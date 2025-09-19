@@ -407,7 +407,7 @@ def main():
         st.warning(f"DOCX 匯出失敗：{e}")
 
 
-        progress_text.empty(); progress_bar.empty()
+    progress_text.empty(); progress_bar.empty()
 
 if __name__ == '__main__':
     main()
