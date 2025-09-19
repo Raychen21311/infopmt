@@ -1,0 +1,14 @@
+streamlit
+pymupdf
+google-generativeai
+pandas
+faiss-cpu
+langchain-community
+python-docx
+ollama
+google-cloud-vision
+pillow
+python-dotenv
+sentence-transformers
+openpyxl
+
