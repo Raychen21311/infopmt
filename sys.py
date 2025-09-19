@@ -215,8 +215,8 @@ def render_wrapped_table(df: pd.DataFrame, height_vh: int = 80):
 
 # ---------------- 主程式（三種模式） ----------------
 def main():
-    st.set_page_config("📑 RFP/契約審查系統", layout="wide")
-    st.title("📑 資訊服務採購 RFP/契約審查系統")
+    st.set_page_config("📑 RFP/契約審查系統(測試版)", layout="wide")
+    st.title("📑 資訊服務採購 RFP/契約審查系統(測試版)")
 
     uploaded_files = st.file_uploader("📥 上傳 RFP/契約 PDF（可複選）", type=["pdf"], accept_multiple_files=True)
     project_name = st.text_input("案件/專案名稱（將用於檔名）", value="未命名案件")
