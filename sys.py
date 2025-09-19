@@ -213,42 +213,6 @@ def render_wrapped_table(df: pd.DataFrame, height_vh: int = 80):
     html = df2.to_html(index=False, escape=False)
     st.markdown(f'<div class="wrap-table-container">{html}</div>', unsafe_allow_html=True)
 
-# ---------------- word檔 ----------------
-def build_word_report(df: pd.DataFrame, project_name: str) -> bytes:
-    doc = Document()
-    doc.add_heading(f"資訊服務採購 RFP/契約 審查報告 — {project_name}", 0)
-
-    # 簡易總覽
-    total = len(df)
-    cnt = {
-        "符合": int((df["符合情形"] == "符合").sum()),
-        "部分符合": int((df["符合情形"] == "部分符合").sum()),
-        "未提及": int((df["符合情形"] == "未提及").sum()),
-        "不適用": int((df["符合情形"] == "不適用").sum()),
-    }
-    p = doc.add_paragraph(
-        f"合規統計：共 {total} 項；符合 {cnt['符合']}、部分符合 {cnt['部分符合']}、未提及 {cnt['未提及']}、不適用 {cnt['不適用']}"
-    )
-    p.runs[0].font.size = Pt(11)
-
-    # 逐筆列示
-    for _, row in df.iterrows():
-        title = doc.add_paragraph()
-        r = title.add_run(f"【{row['編號']}】{row['檢核項目']}")
-        r.bold = True
-        r.font.size = Pt(11)
-        doc.add_paragraph(f"符合情形：{row['符合情形']}")
-        doc.add_paragraph(f"主要證據：\n{row['主要證據']}")
-        if str(row['改善建議']).strip():
-            doc.add_paragraph(f"改善建議：{row['改善建議']}")
-
-    bio = io.BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-    return bio.getvalue()
-
-
-
 # ---------------- 主程式（三種模式） ----------------
 def main():
     st.set_page_config("📑 RFP/契約審查系統(測試版)", layout="wide")
@@ -396,18 +360,7 @@ def main():
         except Exception as e:
             st.warning(f"Excel 匯出失敗：{e}")
 
-
-    try:
-        docx_bytes = build_word_report(df, project_name)
-        b64 = base64.b64encode(docx_bytes).decode("utf-8")
-        file_name = f"{project_name}_RFP_Contract_Review.docx"
-        href = (f'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}📄 另開新視窗下載 DOCX 報告</a>')
-        st.markdown(href, unsafe_allow_html=True)
-    except Exception as e:
-        st.warning(f"DOCX 匯出失敗：{e}")
-
-
-    progress_text.empty(); progress_bar.empty()
+        progress_text.empty(); progress_bar.empty()
 
 if __name__ == '__main__':
     main()
