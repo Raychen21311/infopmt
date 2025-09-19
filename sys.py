@@ -359,6 +359,17 @@ def main():
             )
         except Exception as e:
             st.warning(f"Excel 匯出失敗：{e}")
+        try:
+            docx_bytes = build_word_report(df, project_name)
+            b64 = base64.b64encode(docx_bytes).decode("utf-8")
+            file_name = f"{project_name}_RFP_Contract_Review.docx"
+            href = (
+                f'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}📄 另開新視窗下載 DOCX 報告</a>'
+            )
+            st.markdown(href, unsafe_allow_html=True)
+        except Exception as e:
+            st.warning(f"DOCX 匯出失敗：{e}")
+
 
         progress_text.empty(); progress_bar.empty()
 
