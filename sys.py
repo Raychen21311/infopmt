@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 sys.py — RFP/契約 審查（資訊處檢核版） + 預先審查表（PDF 專用）
+
 功能：
 - 上傳 RFP/契約 PDF（可複選）→ 依檢核清單檢核（一次性/批次/逐題）
 - 上傳「執行單位預先審查表」PDF（可複選/可略過）→ LLM 結構化抽取
@@ -8,11 +9,11 @@ sys.py — RFP/契約 審查（資訊處檢核版） + 預先審查表（PDF 專
 - 產生【差異對照表】（預審 vs. 系統檢核），支援只顯示不一致/缺漏
 - 匯出 Excel（三個工作表）：檢核結果 / 預審辨識 / 差異對照
 
-特別規範：
-- 預審判定僅允許：符合 / 不適用；未勾選顯示為空白（背景比對時正規化為「未提及」）
+規格重點：
+- 預審判定僅允許：符合 / 不適用；未勾選顯示為空白（背景比對正規化為「未提及」）
 - A0（案件性質）為六選一字面值，比對時採字面值比對，不走四態
-- 編號標準化（compute_std_id）：將「案件性質-2.(3)」→ A2.3；「其他重點」→ F 類
-- 批次審查分組：AB｜CDEF
+- 編號標準化（compute_std_id）：中文章節→代碼（A..F）+ 數字（含小數）；「其他重點」→ F
+- 檢核清單包含 F 類；批次審查分組為：AB｜CDEF
 """
 
 import os, re, json, io
@@ -198,8 +199,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
    - **第一列**的每一格依序對應子項 (1)(2)(3)… 的 **「符合」** 欄結果；
    - **第二列**的每一格依序對應子項 (1)(2)(3)… 的 **「不適用」** 欄結果；
    - 將每個子項拆成獨立列（例如「A2.1」「A2.2」「A2.3」…），並依該子項在矩陣同序位格子的「■/□」決定 "status"。
-   - 例如：若四個子項後面出現
-     第一列：`□ □ □ □`、第二列：`■ ■ ■ ■`，則四個子項均為 **"不適用"**。
+   - 例如：若四個子項後面出現第一列：`□ □ □ □`、第二列：`■ ■ ■ ■`，則四個子項均為 **"不適用"**。
 4) 若無矩陣、而是每列文字右側各自出現「符合/不適用」勾選，請就近判斷該列的 "status"。
 5) **不得猜測**：若確實沒有任何「符合/不適用」的勾選跡象，"status" 請回空字串 ""，並提供 evidence。
 
@@ -209,8 +209,8 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "id": "A0", "item": "案件性質（六選一）",
     "status": "（填被勾選的類型字樣）",   # A0 為字面值，非「符合/不適用」
     "biz_ref": "", "note": "", "section_title": "案件性質", "main_no": 0, "std_id": "A0",
-    "evidence": [{{"file":"...", "page": 頁碼, "quote":"..."}}
-  ]}}
+    "evidence": [{{"file":"...", "page": 頁碼, "quote":"..."}}]
+  }}
 
 【安全規範】
 - 僅依文件明載內容；不可發明。
@@ -236,12 +236,12 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 {corpus_text}
 """.strip()
 
-
 # ==================== 解析/轉表工具 ====================
 def parse_json_array(text: str) -> List[Dict[str, Any]]:
     t = text.strip()
-    t = re.sub(r'^\`\`\`(?:json)?', '', t, flags=re.I).strip()
-    t = re.sub(r'\`\`\`$', '', t, flags=re.I).strip()
+    # 去除可能的 ```json / ``` 包裹
+    t = re.sub(r'^```(?:json)?', '', t, flags=re.I).strip()
+    t = re.sub(r'```$', '', t, flags=re.I).strip()
     if t.startswith('{') and t.endswith('}'):
         try:
             d = json.loads(t); return [d]
@@ -356,9 +356,10 @@ def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
             "main_no": r.get("main_no", None),
             "sub_no": r.get("sub_no", None),
             "std_id": r.get("std_id","").strip(),             # 若模型已算出
-            "evidence": ev,                                   # 保留但不顯示
+            "evidence": ev,                                    # 保留但不顯示
         })
     return rows
+
 def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     # 先求出標準 ID（若 LLM 沒給 std_id，就用 compute_std_id 推斷）
     std_ids = []
@@ -408,7 +409,7 @@ def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
         pass
     return df
 
-# ==================== 預審 vs 系統 檢核：差異對照 ====================
+# ==================== 預審 vs 系統 檢核：差異對照（已修正 KeyError） ====================
 def fuzzy_match(best_of: List[str], query: str) -> Tuple[str, float]:
     best_id, best_ratio = "", 0.0
     for cand in best_of:
@@ -422,8 +423,14 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
     sys_df 來自 to_dataframe(): 欄位 [類別, 編號, 檢核項目, 符合情形, 主要證據, 改善建議]
     pre_df 來自預審辨識：      欄位 [編號, 檢核項目, 預審判定, 對應業次, 備註, _預審等價級_隱藏]
     """
-    sys_idx = {str(i): r for i, r in sys_df.set_index("編號").to_dict(orient="index").items()}
-    rows = []
+    # 關鍵修正：不要用 set_index("編號").to_dict(...) 以免列 dict 失去「編號」欄
+    sys_idx: Dict[str, Dict[str, Any]] = {}
+    for _, row in sys_df.iterrows():
+        rid = str(row.get("編號", "")).strip()
+        if rid:
+            sys_idx[rid] = row.to_dict()
+
+    rows_out: List[Dict[str, Any]] = []
 
     # 確保有等價級欄位
     if "_預審等價級_隱藏" not in pre_df.columns:
@@ -436,35 +443,37 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         peq   = str(prow.get("_預審等價級_隱藏",""))     # 正規化：符合/不適用/未提及
 
         matched = None
+        matched_id = ""
+
         if pid and pid in sys_idx:
-            matched = sys_idx[pid]
+            matched = sys_idx[pid]; matched_id = pid
         else:
-            # 若編號空白或不在系統清單（例如額外自定項），嘗試以文字相似度
+            # 若編號空白或不在系統清單，嘗試以文字相似度
             best_id, best_ratio = fuzzy_match(list(sys_idx.keys()), pid or pitem)
             if best_ratio >= 0.85 and best_id in sys_idx:
-                matched = sys_idx[best_id]
+                matched = sys_idx[best_id]; matched_id = best_id
 
         if matched:
             # ★ A0 用字面比對（六選一）；其餘用四態（等價級）比對
-            if matched["編號"] == "A0":
-                diff = "一致" if pori.strip() == str(matched["符合情形"]).strip() else "不一致"
+            if matched_id == "A0":
+                diff = "一致" if pori.strip() == str(matched.get("符合情形","")).strip() else "不一致"
             else:
-                diff = "一致" if matched["符合情形"] == peq else "不一致"
+                diff = "一致" if matched.get("符合情形","") == peq else "不一致"
 
-            rows.append({
-                "類別": matched["類別"],
-                "編號": matched["編號"],
-                "檢核項目（系統基準）": matched["檢核項目"],
+            rows_out.append({
+                "類別": matched.get("類別",""),
+                "編號": matched_id,
+                "檢核項目（系統基準）": matched.get("檢核項目",""),
                 "預審判定（原字）": pori,
                 "預審等價級": peq,
-                "系統檢核結果": matched["符合情形"],
+                "系統檢核結果": matched.get("符合情形",""),
                 "差異判定": diff,
                 "差異說明/建議": matched.get("改善建議","") if diff=="不一致" else "",
                 "對應業次": prow.get("對應業次",""),
                 "備註": prow.get("備註",""),
             })
         else:
-            rows.append({
+            rows_out.append({
                 "類別": "",
                 "編號": pid or "（未識別）",
                 "檢核項目（系統基準）": pitem,
@@ -478,28 +487,28 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
             })
 
     # 系統有但預審沒有（針對 A~F）
-    pre_ids = set([str(x).strip() for x in pre_df["編號"].tolist() if str(x).strip()])
+    pre_ids = set([str(x).strip() for x in pre_df.get("編號", pd.Series(dtype=str)).tolist() if str(x).strip()])
     for _, srow in sys_df.iterrows():
-        sid = str(srow["編號"]).strip()
+        sid = str(srow.get("編號","")).strip()
         if sid and sid not in pre_ids:
-            rows.append({
-                "類別": srow["類別"],
-                "編號": srow["編號"],
-                "檢核項目（系統基準）": srow["檢核項目"],
+            rows_out.append({
+                "類別": srow.get("類別",""),
+                "編號": srow.get("編號",""),
+                "檢核項目（系統基準）": srow.get("檢核項目",""),
                 "預審判定（原字）": "",
                 "預審等價級": "未提及",
-                "系統檢核結果": srow["符合情形"],
+                "系統檢核結果": srow.get("符合情形",""),
                 "差異判定": "系統多出",
                 "差異說明/建議": "預審未涵蓋此系統檢核項目，建議補列或於會審時提示承辦注意。",
                 "對應業次": "",
                 "備註": "",
             })
 
-    out = pd.DataFrame(rows)
+    out = pd.DataFrame(rows_out)
     # 依 A→B→C→D→E→F 與編號排序
     try:
         out["主碼"] = out["編號"].str.extract(r"([A-F])")
-        out["子碼值"] = pd.to_numeric(out["編號"].str.extract(r"(\d+(?:\.\d+)?)")[0], errors='coerce')
+        out["子碼值"] = pd.to_numeric(out["編號"].str.extract(r"(\d+(?:\.\d+)?)")[0], errors="coerce")
         code_order = {"A":0, "B":1, "C":2, "D":3, "E":4, "F":5}
         out["主序"] = out["主碼"].map(code_order).fillna(9)
         out = out.sort_values(["主序","子碼值","編號"], kind="mergesort").drop(columns=["主碼","子碼值","主序"])
