@@ -553,6 +553,7 @@ def main():
     )
 
     if st.button("🚀 開始審查", disabled=not uploaded_files):
+        
         checklist_all = build_rfp_checklist()
 
         # 進度條
@@ -563,6 +564,8 @@ def main():
         # 1) 解析 RFP/契約 PDF
         set_progress(5, "📄 解析與彙整 RFP/契約 文件文字…")
         corpora = []; total_files = len(uploaded_files)
+        st.info("📄 開始解析 RFP/契約 PDF 檔案…")
+
         for i, f in enumerate(uploaded_files):
             set_progress(int((i/max(1,total_files))*30), f"📄 解析 {f.name} ({i+1}/{total_files})…")
             pdf_bytes = f.read(); text = extract_text_with_headers(pdf_bytes, f.name)
@@ -578,6 +581,7 @@ def main():
             pre_texts = []
             for pf in pre_files:
                 if is_pdf(pf.name):
+                    st.write(f"📄 正在處理：{pf.name}"
                     pbytes = pf.read()
                     ptext = extract_text_with_headers(pbytes, pf.name)
                     if ptext.strip():
@@ -585,14 +589,18 @@ def main():
                     else:
                         st.warning(f"⚠️ {pf.name} 可能是掃描影像 PDF，無法直接抽文字。請提供可搜尋 PDF。")
             if pre_texts:
+                st.info("📄 開始解析預審表 PDF 檔案…")
                 pre_corpus = "\n\n".join(pre_texts)
                 prompt = make_precheck_parse_prompt(pre_corpus)
                 try:
+                    st.info("🤖 呼叫模型進行預審表結構化辨識…")
                     resp = model.generate_content(prompt)
+                    st.info("📦 解析模型回傳的 JSON 結構…")
                     rows = parse_precheck_json(resp.text)
                     if rows:
+                        st.info("📊 將預審表轉為 DataFrame 表格…")
                         pre_df = precheck_rows_to_df(rows)
-                except Exception as e:
+                except Exception as e:v
                     st.warning("⚠️ 預審表解析失敗：{e}，請稍後重試或改上傳另一份 PDF。")
 
             if not pre_df.empty:
@@ -606,6 +614,7 @@ def main():
 
         # 3) 依模式執行檢核（一次性｜批次 AB/CDEF｜逐題）
         all_results: List[Dict[str, Any]] = []
+        st.info(f"🧪 執行系統檢核模式：{mode}")
         if mode.startswith("一"):
             groups = group_items_by_ABCDE(checklist_all); st.info("一次性審查中")
         elif mode.startswith("批"):
@@ -688,6 +697,7 @@ def main():
         # 5) 差異對照（若有預審）
         cmp_df = pd.DataFrame()
         if not pre_df.empty and not df.empty:
+            st.info("📋 建立預審與系統檢核的差異對照表…")
             cmp_df = build_compare_table(sys_df=df, pre_df=pre_df)
             st.subheader("🧾 差異對照表（預審 vs. 系統檢核）")
             show_only_diff = st.checkbox("只顯示『不一致/缺漏』", value=True)
@@ -698,6 +708,7 @@ def main():
         try:
             from openpyxl.styles import Alignment
             xbio = io.BytesIO()
+            st.info("📁 匯出 Excel（檢核結果＋預審辨識＋差異對照）…")
             with pd.ExcelWriter(xbio, engine='openpyxl') as writer:
                 # Sheet1: 檢核結果
                 df.to_excel(writer, index=False, sheet_name='檢核結果')
