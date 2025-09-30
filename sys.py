@@ -210,7 +210,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "status": "（填被勾選的類型字樣）",   # A0 為字面值，非「符合/不適用」
     "biz_ref_note": "",
     "section_title": "案件性質", "main_no": 0, "std_id": "A0",
-    "evidence": [{"file":"...", "page": 頁碼, "quote":"..."}]
+    "evidence": [{{"file":"...", "page": 頁碼, "quote":"..."}}]
   }}
 
 【安全規範】
