@@ -228,7 +228,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "main_no": 1,
     "sub_no": 2,
     "std_id": "B1.2",
-    "evidence": [{{"file":"xxx.pdf","page":2,"quote":"…"}}]
+    "evidence": [{"file":"xxx.pdf","page":2,"quote":"…"}]
   }}
 ]
 
