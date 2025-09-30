@@ -374,8 +374,8 @@ def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
         "編號":     std_ids,                         # 使用標準 ID；空白代表無對應
         "檢核項目": [r.get("item","") for r in rows],
         "預審判定": [r.get("status","") for r in rows],
-        "對應業次": [r.get("biz_ref","") for r in rows],
-        "備註":     [r.get("note","") for r in rows],
+        "對應頁次/備註": ev_text,  # 
+
     })
 
     # 背景隱藏欄位（供差異對照與除錯）——不顯示、不匯出
@@ -597,7 +597,7 @@ def main():
 
             if not pre_df.empty:
                 st.subheader("🔎 預審辨識表（請先檢視是否正確）")
-                pre_display_cols = ["編號", "檢核項目", "預審判定", "對應業次", "備註"]
+                pre_display_cols = ["編號", "檢核項目", "預審判定", "對應頁次/備註"]
                 render_wrapped_table(pre_df[pre_display_cols], height_vh=40)
             else:
                 st.info("ℹ️ 未上傳或未成功辨識任何預審表內容。")
@@ -714,7 +714,7 @@ def main():
 
                 # Sheet2: 預審辨識（只輸出五欄）
                 if not pre_df.empty:
-                    pre_display_cols = ["編號", "檢核項目", "預審判定", "對應業次", "備註"]
+                    pre_display_cols = ["編號", "檢核項目", "預審判定", "對應頁次/備註"]
                     pre_df[pre_display_cols].to_excel(writer, index=False, sheet_name='預審辨識')
                     ws2 = writer.sheets['預審辨識']
                     for row in ws2.iter_rows(min_row=1, max_row=ws2.max_row, min_col=1, max_col=ws2.max_column):
