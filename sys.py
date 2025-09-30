@@ -18,6 +18,7 @@ sys.py — RFP/契約 審查（資訊處檢核版） + 預先審查表（PDF 專
 
 import os, re, json, io
 from typing import List, Dict, Any, Tuple
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import streamlit as st
 import fitz  # PyMuPDF
 import pandas as pd
@@ -702,7 +703,26 @@ def main():
             cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應頁次/備註", "系統檢核結果", "差異說明/建議"]
             view_df = view_df[cmp_display_cols]
 
-            render_wrapped_table(view_df, height_vh=40)
+            # 建立 AgGrid 設定
+            gb = GridOptionsBuilder.from_dataframe(view_df)
+            gb.configure_default_column(resizable=True, filter=True, sortable=True)
+            gb.configure_side_bar()
+            gb.configure_pagination(paginationAutoPageSize=True)
+            grid_options = gb.build()
+
+            # 顯示互動表格
+            AgGrid(
+                view_df,gridOptions=grid_options,height=600,fit_columns_on_grid_load=False,
+                update_mode=GridUpdateMode.NO_UPDATE,
+                allow_unsafe_jscode=True,
+                enable_enterprise_modules=False)
+
+            # 提供下載 CSV
+            csv = view_df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(label="📥 下載差異對照表 CSV",data=csv,file_name="compare_table.csv",mime="text/csv")
+
+
+           # render_wrapped_table(view_df, height_vh=40)
 
         # 6) Excel 匯出（3 工作表）
         try:
