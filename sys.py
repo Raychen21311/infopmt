@@ -182,7 +182,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 - "id": 先填你能辨識的粗編號（如「案件性質-1.」「現況說明-1.(2)」「A2.3」等；若無可留空）
 - "item": 檢核項目（擷取要點，不要省略）
 - "status": 僅能輸出二選一【符合｜不適用】；若該列未勾選任何選項，請輸出空字串 ""
-- "biz_ref_note": 對應頁次（對應頁次或補充說明）
+- "biz_ref_note": 對應頁次或補充說明
 
 【輔助判斷欄（可缺漏）】
 - "section_title": 章節標題（如「案件性質」「現況說明」「資安需求」「作業需求」「產品交付」「其他重點」）
@@ -207,7 +207,8 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
   {{
     "id": "A0", "item": "案件性質（六選一）",
     "status": "（填被勾選的類型字樣）",   # A0 為字面值，非「符合/不適用」
-    "biz_ref_note": "", "note": "", "section_title": "案件性質", "main_no": 0, "std_id": "A0",
+    "biz_ref_note": "",
+    "section_title": "案件性質", "main_no": 0, "std_id": "A0",
     "evidence": [{{"file":"...", "page": 頁碼, "quote":"..."}}]
   }}
 
@@ -221,8 +222,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "id": "現況說明-1.(2)",
     "item": "透過何種網路架構…並說明廠牌、型號、版本等。",
     "status": "符合",        # 或 "不適用"；若未勾選則輸出 ""
-    "biz_ref": "",
-    "note": "需求說明書 P.11-12",
+    "biz_ref_note": "需求說明書 P.11-12等文字",
     "section_title": "現況說明",
     "main_no": 1,
     "sub_no": 2,
@@ -349,8 +349,7 @@ def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
             "raw_id": r.get("id","").strip(),                 # LLM 粗編號（原樣）
             "item": r.get("item","").strip(),
             "status": r.get("status","").strip(),             # 僅允許：符合/不適用/""(未勾)
-            "biz_ref": r.get("biz_ref","").strip(),
-            "note": r.get("note","").strip(),
+            "biz_ref_note": r.get("biz_ref_note","").strip(),
             "section_title": r.get("section_title","").strip(),
             "main_no": r.get("main_no", None),
             "sub_no": r.get("sub_no", None),
