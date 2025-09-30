@@ -355,7 +355,7 @@ def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
             "main_no": r.get("main_no", None),
             "sub_no": r.get("sub_no", None),
             "std_id": r.get("std_id","").strip(),             # 若模型已算出
-            "evidence": ev,                                    # 保留但不顯示
+            "evidence": r.get("evidence","").strip(),                                    # 保留但不顯示
         })
     return rows
 
@@ -393,7 +393,7 @@ def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
             "編號": r.get("id",""),
             "檢核項目": r.get("item",""),
             "符合情形": r.get("compliance",""),
-            "主要證據": ev_text,
+            "主要證據": r.get("evidence",""),
             "改善建議": r.get("recommendation",""),
         })
     df = pd.DataFrame(rows)
