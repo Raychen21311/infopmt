@@ -600,7 +600,7 @@ def main():
                         st.info("📊 將預審表轉為 DataFrame 表格…")
                         pre_df = precheck_rows_to_df(rows)
                 except Exception as e:
-                    st.warning("⚠️ 預審表解析失敗：{e}，請稍後重試或改上傳另一份 PDF。")
+                    st.warning(f"⚠️ 預審表解析失敗：{e}，請稍後重試或改上傳另一份 PDF。")
 
             if not pre_df.empty:
                 st.subheader("🔎 預審辨識表（請先檢視是否正確）")
