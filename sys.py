@@ -356,7 +356,8 @@ def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
             "sub_no": r.get("sub_no", None),
             "std_id": r.get("std_id","").strip(),             # 若模型已算出
             "evidence": r.get("evidence","").strip()                                    # 保留但不顯示
-        })
+        }
+                   )
     return rows
 
 def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -373,7 +374,7 @@ def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
         "編號":     std_ids,                         # 使用標準 ID；空白代表無對應
         "檢核項目": [r.get("item","") for r in rows],
         "預審判定": [r.get("status","") for r in rows],
-        "對應頁次/備註": [r.get("biz_ref_note","") for r in rows],  # 
+        "對應頁次/備註": [r.get("biz_ref_note","") for r in rows]  # 
 
     })
 
@@ -394,7 +395,7 @@ def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
             "檢核項目": r.get("item",""),
             "符合情形": r.get("compliance",""),
             "主要證據": r.get("evidence",""),
-            "改善建議": r.get("recommendation",""),
+            "改善建議": r.get("recommendation","")
         })
     df = pd.DataFrame(rows)
     # 友善排序（A→B→C→D→E→F）
@@ -545,7 +546,7 @@ def main():
     mode = st.radio(
         "檢核模式",
         ("一次性審查", "批次審查", "逐題審查"),
-        horizontal=True,
+        horizontal=True
     )
 
     if st.button("🚀 開始審查", disabled=not uploaded_files):
