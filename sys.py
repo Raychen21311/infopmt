@@ -592,8 +592,8 @@ def main():
                     rows = parse_precheck_json(resp.text)
                     if rows:
                         pre_df = precheck_rows_to_df(rows)
-                except Exception:
-                    st.warning("⚠️ 預審表解析失敗，請稍後重試或改上傳另一份 PDF。")
+                except Exception as e:
+                    st.warning("⚠️ 預審表解析失敗：{e}，請稍後重試或改上傳另一份 PDF。")
 
             if not pre_df.empty:
                 st.subheader("🔎 預審辨識表（請先檢視是否正確）")
