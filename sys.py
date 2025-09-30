@@ -700,6 +700,11 @@ def main():
             st.subheader("🧾 差異對照表（預審 vs. 系統檢核）")
             show_only_diff = st.checkbox("只顯示『不一致/缺漏』", value=True)
             view_df = cmp_df[cmp_df["差異判定"] != "一致"] if show_only_diff else cmp_df
+            
+            # 只保留指定欄位
+            cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應業次", "備註", "系統檢核結果", "差異說明/建議"]
+            view_df = view_df[cmp_display_cols]
+
             render_wrapped_table(view_df, height_vh=40)
 
         # 6) Excel 匯出（3 工作表）
