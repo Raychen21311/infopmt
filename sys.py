@@ -5,7 +5,7 @@ sys.py — RFP/契約 審查（資訊處檢核版） + 預先審查表（PDF 專
 功能：
 - 上傳 RFP/契約 PDF（可複選）→ 依檢核清單檢核（一次性/批次/逐題）
 - 上傳「執行單位預先審查表」PDF（可複選/可略過）→ LLM 結構化抽取
-- 先顯示【預審辨識表】（固定 5 欄：編號/檢核項目/預審判定/對應業次/備註）
+- 先顯示【預審辨識表】（固定 5 欄：編號/檢核項目/預審判定/"對應頁次/備註"）
 - 產生【差異對照表】（預審 vs. 系統檢核），支援只顯示不一致/缺漏
 - 匯出 Excel（三個工作表）：檢核結果 / 預審辨識 / 差異對照
 
@@ -419,7 +419,7 @@ def fuzzy_match(best_of: List[str], query: str) -> Tuple[str, float]:
 def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFrame:
     """
     sys_df 來自 to_dataframe(): 欄位 [類別, 編號, 檢核項目, 符合情形, 主要證據, 改善建議]
-    pre_df 來自預審辨識：      欄位 [編號, 檢核項目, 預審判定, 對應業次, 備註, _預審等價級_隱藏]
+    pre_df 來自預審辨識：      欄位 [編號, 檢核項目, 預審判定, 對應頁次/備註, _預審等價級_隱藏]
     """
     # 關鍵修正：不要用 set_index("編號").to_dict(...) 以免列 dict 失去「編號」欄
     sys_idx: Dict[str, Dict[str, Any]] = {}
@@ -467,8 +467,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "系統檢核結果": matched.get("符合情形",""),
                 "差異判定": diff,
                 "差異說明/建議": matched.get("改善建議","") if diff=="不一致" else "",
-                "對應業次": prow.get("對應業次",""),
-                "備註": prow.get("備註",""),
+                "對應頁次/備註": prow.get("對應頁次/備註","")
             })
         else:
             rows_out.append({
@@ -480,8 +479,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "系統檢核結果": "（無對應）",
                 "差異判定": "預審多出",
                 "差異說明/建議": "此預審項目在系統檢核清單中無直接對應；請人工確認是否需納入清單或為表述差異。",
-                "對應業次": prow.get("對應業次",""),
-                "備註": prow.get("備註",""),
+                "對應頁次/備註": prow.get("對應頁次/備註","")
             })
 
     # 系統有但預審沒有（針對 A~F）
@@ -498,8 +496,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "系統檢核結果": srow.get("符合情形",""),
                 "差異判定": "系統多出",
                 "差異說明/建議": "預審未涵蓋此系統檢核項目，建議補列或於會審時提示承辦注意。",
-                "對應業次": "",
-                "備註": "",
+                "對應頁次/備註": ""
             })
 
     out = pd.DataFrame(rows_out)
@@ -702,7 +699,7 @@ def main():
             view_df = cmp_df[cmp_df["差異判定"] != "一致"] if show_only_diff else cmp_df
             
             # 只保留指定欄位
-            cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應業次", "備註", "系統檢核結果", "差異說明/建議"]
+            cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應頁次/備註", "系統檢核結果", "差異說明/建議"]
             view_df = view_df[cmp_display_cols]
 
             render_wrapped_table(view_df, height_vh=40)
