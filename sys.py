@@ -182,8 +182,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 - "id": 先填你能辨識的粗編號（如「案件性質-1.」「現況說明-1.(2)」「A2.3」等；若無可留空）
 - "item": 檢核項目（擷取要點，不要省略）
 - "status": 僅能輸出二選一【符合｜不適用】；若該列未勾選任何選項，請輸出空字串 ""
-- "biz_ref": 對應業次（若文件有或可合理對應，填；否則空字串）
-- "note": 備註（對應頁次或補充說明）
+- "biz_ref_note": 對應頁次（對應頁次或補充說明）
 
 【輔助判斷欄（可缺漏）】
 - "section_title": 章節標題（如「案件性質」「現況說明」「資安需求」「作業需求」「產品交付」「其他重點」）
@@ -208,7 +207,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
   {{
     "id": "A0", "item": "案件性質（六選一）",
     "status": "（填被勾選的類型字樣）",   # A0 為字面值，非「符合/不適用」
-    "biz_ref": "", "note": "", "section_title": "案件性質", "main_no": 0, "std_id": "A0",
+    "biz_ref_note": "", "note": "", "section_title": "案件性質", "main_no": 0, "std_id": "A0",
     "evidence": [{{"file":"...", "page": 頁碼, "quote":"..."}}]
   }}
 
