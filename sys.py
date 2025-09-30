@@ -703,23 +703,24 @@ def main():
             cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應頁次/備註", "系統檢核結果", "差異說明/建議"]
             view_df = view_df[cmp_display_cols]
 
-            # 建立 AgGrid 設定
-            gb = GridOptionsBuilder.from_dataframe(view_df)
-            gb.configure_default_column(resizable=True, filter=True, sortable=True)
-            gb.configure_side_bar()
-            gb.configure_pagination(paginationAutoPageSize=True)
-            grid_options = gb.build()
+
+            # 可加上搜尋欄位（選用）
+            search_term = st.text_input("🔍 搜尋檢核項目")
+            if search_term:
+                view_df = view_df[view_df["檢核項目（系統基準）"].str.contains(search_term, case=False, na=False)]
 
             # 顯示互動表格
-            AgGrid(
-                view_df,gridOptions=grid_options,height=600,fit_columns_on_grid_load=False,
-                update_mode=GridUpdateMode.NO_UPDATE,
-                allow_unsafe_jscode=True,
-                enable_enterprise_modules=False)
-
-            # 提供下載 CSV
+            st.data_editor(
+                view_df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["類別", "編號", "檢核項目（系統基準）", "系統檢核結果"],  # 禁止編輯這些欄位
+                column_config={
+                    "預審判定（原字）": st.column_config.SelectboxColumn(
+                        "預審判定", options=["符合", "不適用", ""], required=False)})
+            # 匯出 CSV
             csv = view_df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(label="📥 下載差異對照表 CSV",data=csv,file_name="compare_table.csv",mime="text/csv")
+            st.download_button("📥 下載差異對照表 CSV", data=csv, file_name="compare_table.csv", mime="text/csv")
 
 
            # render_wrapped_table(view_df, height_vh=40)
