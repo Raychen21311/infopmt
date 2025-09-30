@@ -581,7 +581,7 @@ def main():
             pre_texts = []
             for pf in pre_files:
                 if is_pdf(pf.name):
-                    st.write(f"📄 正在處理：{pf.name}"
+                    st.write(f"📄 正在處理：{pf.name}")
                     pbytes = pf.read()
                     ptext = extract_text_with_headers(pbytes, pf.name)
                     if ptext.strip():
