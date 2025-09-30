@@ -372,7 +372,7 @@ def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
         "編號":     std_ids,                         # 使用標準 ID；空白代表無對應
         "檢核項目": [r.get("item","") for r in rows],
         "預審判定": [r.get("status","") for r in rows],
-        "對應頁次/備註": ev_text,  # 
+        "對應頁次/備註": [r.get("biz_ref_note","") for r in rows],  # 
 
     })
 
