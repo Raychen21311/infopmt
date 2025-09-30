@@ -355,7 +355,7 @@ def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
             "main_no": r.get("main_no", None),
             "sub_no": r.get("sub_no", None),
             "std_id": r.get("std_id","").strip(),             # 若模型已算出
-            "evidence": r.get("evidence","").strip()                                    # 保留但不顯示
+            "evidence": r.get("evidence","")                                    # 保留但不顯示
         }
                    )
     return rows
