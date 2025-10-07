@@ -393,7 +393,8 @@ def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
 def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
     rows = []
     for r in results:
-        ev_text = "\n".join([f"{e.get('file','')} p.{e.get('page','')}：{e.get('quote','')}" for e in r.get('evidence', [])])
+        ev = r.get("evidence", {})
+        ev_text = f"{ev.get('file','')} p.{ev.get('page','')}：{ev.get('quote','')}"
         rows.append({
             "類別": r.get("category",""),
             "編號": r.get("id",""),
