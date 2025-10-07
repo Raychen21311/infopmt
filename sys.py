@@ -162,7 +162,7 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
     "category": "A 基本與前案",
     "item": "條目原文（請完整複製）",
     "compliance": "若 id = 'A0'：僅能輸出六選一【開發建置｜系統維運｜功能增修｜套裝軟體｜硬體｜其他】；若 id ≠ 'A0'：僅能輸出四選一【符合｜部分符合｜未提及｜不適用】；禁止同時輸出多個或其他文字",
-    "evidence": [{{"file": "檔名", "page": 頁碼, "quote": "逐字引述"}}],
+    "evidence": [{"file": "檔名", "page": 頁碼, "quote": "逐字引述"}],
     "recommendation": "若未提及/部分符合，請給具體補強方向；否則留空"
   }}
 ]
