@@ -224,7 +224,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 
 【輸出格式 — 僅能輸出 JSON 陣列，無多餘文字】
 [
-  {{
+  {
     "id": "現況說明-1.(2)",
     "item": "透過何種網路架構…並說明廠牌、型號、版本等。",
     "status": "符合",        # 或 "不適用"；若未勾選則輸出 ""
@@ -233,8 +233,8 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "main_no": 1,
     "sub_no": 2,
     "std_id": "B1.2",
-    "evidence": [{{"file":"xxx.pdf","page":2,"quote":"…"}}]
-  }}
+    "evidence": [{"file":"xxx.pdf","page":2,"quote":"…"}]
+  }
 ]
 
 【文件全文（含檔名/頁碼標註）】
