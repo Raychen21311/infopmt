@@ -396,7 +396,16 @@ def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
     rows = []
     for r in results:
         ev = r.get("evidence", {})
-        ev_text = f"{ev.get('file','')} p.{ev.get('page','')}：{ev.get('quote','')}"
+                # 若 evidence 是 list，轉成可讀文字
+        if isinstance(ev, list):
+            ev_text = "\n".join([
+                f"{e.get('file','')} p.{e.get('page','')}：{e.get('quote','')}"
+                for e in ev if isinstance(e, dict)
+            ])
+        elif isinstance(ev, dict):
+            ev_text = f"{ev.get('file','')} p.{ev.get('page','')}：{ev.get('quote','')}"
+        else:
+            ev_text = ""
         rows.append({
             "類別": r.get("category",""),
             "編號": r.get("id",""),
