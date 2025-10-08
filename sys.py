@@ -210,13 +210,14 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 
 【A0 特例（多選）】
 - 若檢出「案件性質」類型勾選（開發建置/系統維運/功能增修/套裝軟體/硬體/其他），請額外新增一列 A0：
-  {
-    "id": "A0", "item": "案件性質（多選）",
+  [
+   { "id": "A0", "item": "案件性質（多選）",
     "status": "（填被勾選的類型字樣）",   # A0 為字面值，非「符合/不適用」
     "biz_ref_note": "",
     "section_title": "案件性質", "main_no": 0, "std_id": "A0",
-    "evidence": [{"file":"...", "page": 頁碼, "quote":"..."}]
-  }
+    "evidence": {{"file":"...", "page": 頁碼, "quote":"..."}}
+   }
+  ]
 
 【安全規範】
 - 僅依文件明載內容；不可發明。
