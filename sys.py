@@ -157,7 +157,7 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
 6) 若 id = 'A2.1、A2.2、A2.3 或 A2.4'，原則上預審表結果為不適用即為不適用，並提醒使用者再次核實。
 【輸出格式 — 僅能輸出 JSON 陣列，無任何多餘文字/標記】
 [
-  {{
+  {
     "id": "A1",
     "category": "A 基本與前案",
     "item": "條目原文（請完整複製）",
@@ -167,7 +167,7 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
         "page": "頁碼",
         "quote": "逐字引述"}},
     "recommendation": "若未提及/部分符合，請給具體補強方向；否則留空"
-  }}
+  }
 ]
 【本批檢核清單（id｜item）】
 {checklist_lines}
@@ -210,13 +210,13 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 
 【A0 特例（多選）】
 - 若檢出「案件性質」類型勾選（開發建置/系統維運/功能增修/套裝軟體/硬體/其他），請額外新增一列 A0：
-  {{
+  {
     "id": "A0", "item": "案件性質（多選）",
     "status": "（填被勾選的類型字樣）",   # A0 為字面值，非「符合/不適用」
     "biz_ref_note": "",
     "section_title": "案件性質", "main_no": 0, "std_id": "A0",
-    "evidence": [{{"file":"...", "page": 頁碼, "quote":"..."}}]
-  }}
+    "evidence": [{"file":"...", "page": 頁碼, "quote":"..."}]
+  }
 
 【安全規範】
 - 僅依文件明載內容；不可發明。
