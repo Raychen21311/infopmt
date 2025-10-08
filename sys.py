@@ -236,7 +236,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "sub_no": 2,
     "std_id": "B1.2",
     "evidence": [{"file":"xxx.pdf","page":2,"quote":"…"}]
-  }]
+  }}
 ]
 
 【文件全文（含檔名/頁碼標註）】
