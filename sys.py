@@ -485,7 +485,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "預審等價級": peq,
                 "系統檢核結果": matched.get("符合情形",""),
                 "差異判定": diff,
-                "差異說明/建議": matched.get("改善建議","") if diff=="不一致" else "",
+                "差異說明/建議": matched.get("改善建議",""),
                 "對應頁次/備註": prow.get("對應頁次/備註","")
             })
         else:
