@@ -846,7 +846,7 @@ def main():
 
         # （選用）使用 LLM 對需補強的「建議回覆內容」潤飾
         if gen_reply and refine_reply:
-            need_refine = df[(df["建議回覆內容"].astype(str).str.strip()!="") & (~df["符合情形"].isin(["符合"])))]
+            need_refine = df[(df["建議回覆內容"].astype(str).str.strip() != "") & (~df["符合情形"].isin(["符合"]))]
             if not need_refine.empty:
                 items_for_refine = []
                 for _, row in need_refine.iterrows():
