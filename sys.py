@@ -1,15 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-sys.py — RFP/契約 審查（資訊處檢核版）
+sys.py — RFP/契約 審查（資訊處檢核版）+ 建議回覆內容（LLM版）+ 本地知識庫
 
 此版重點（2025-10-13）：
 - 檢核模式：僅保留「一次性審查」。
-- 顯示：只保留「差異對照表」與「建議回覆內容」。
-- 建議回覆內容：
-  * 僅輸出兩行重點（採購金額＋固定維運遞減句）。
-  * 預算金額由 LLM 從 RFP/契約全文搜尋抽取（轉為『萬元』）。
-  * 不取得案件性質、不下載 Word、不插入參考文字到草稿。
-- Excel 匯出：僅輸出「差異對照」工作表。
+- 顯示：只保留「差異對照表」與「建議回覆內容（LLM生成）」。
+- 建議回覆內容（LLM生成）：
+  * 以 Prompt 要求 LLM 產出正式、簡潔的「建議回覆內容」。
+  * 第一點固定涵蓋『本案採購金額（萬元）』；第二點固定涵蓋『維運費用逐年遞減』句。
+  * 可選擇加入『知識庫項目』作為 Prompt 的上下文（不直接插入到草稿）。
+  * 預算金額由 LLM 從 RFP/契約全文抽取（轉為『萬元』），可手動覆蓋。
+- 本地知識庫：
+  * 內建預設項目（醫療標準參考、維運遞減原則、句型範本）。
+  * 可新增、刪除、勾選是否納入 Prompt；可上傳歷史回覆文字/PDF作為知識庫項目。
+- Excel：僅輸出「差異對照」工作表。
+- 不下載 Word；不取得案件性質。
 """
 
 import os
@@ -32,9 +37,15 @@ if os.getenv('GOOGLE_API_KEY'):
     genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 model = genai.GenerativeModel("gemini-2.5-flash")
 
+# --------------------- 常數 ---------------------
+KB_PATH = 'kb_store.json'
+
 # --------------------- 檔案型態 ---------------------
 def is_pdf(name: str) -> bool:
     return name.lower().endswith(".pdf")
+
+def is_text(name: str) -> bool:
+    return any([name.lower().endswith(ext) for ext in ('.txt', '.md', '.json')])
 
 # ==================== 檢核清單（含 F 其他重點） ====================
 def build_rfp_checklist() -> List[Dict[str, Any]]:
@@ -114,10 +125,6 @@ def build_rfp_checklist() -> List[Dict[str, Any]]:
 
     return items
 
-# ==================== 分群/排序工具（僅用一次性 ABCDE） ====================
-def group_items_by_ABCDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
-    return [("ABCDE", items)] if items else []
-
 # ==================== PDF 解析 ====================
 def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype='pdf')
@@ -130,7 +137,7 @@ def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
         parts.append(f"\n\n===== 【檔案: {filename} 頁: {i}】 =====\n" + text)
     return "\n".join(parts)
 
-# ==================== LLM Prompts ====================
+# ==================== LLM Prompts（檢核/預審解析） ====================
 def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text: str) -> str:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
     return f"""
@@ -166,13 +173,128 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 - "status"（僅能【符合｜不適用】或空字串）
 - "biz_ref_note"（對應頁次/備註）
 - "std_id"（若能判定對應清單編號）
-- "Evidence": 每列至少一筆：{{"file": 檔名, "page": 頁碼, "quote": 引述短句}}
+Evidence 至少一筆：{{{"file":"...", "page": 頁碼, "quote":"..."}}}
 禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
 【輸出格式 — 僅能輸出 JSON 陣列】
 [ {{ "id": "現況說明-1.(2)", "item": "...", "status": "符合", "biz_ref_note": "...", "std_id": "B1.2" }} ]
 【文件全文（含檔名/頁碼標註）】
 {corpus_text}
 """.strip()
+
+# ==================== 本地知識庫 ====================
+def default_kb_items() -> List[Dict[str, Any]]:
+    return [
+        {
+            "id": "kb_med_std",
+            "title": "醫療資料標準參考",
+            "body": (
+                "有關醫療資料內容，請參閱本部醫療資訊大平台之醫療資訊標準，如 FHIR、LOINC、SNOMED CT、RxNorm，"
+                "且符合三大AI中心、SMART on FHIR等作業事項。另如有TWCDI及IG需求，可至該平台提案。"
+            ),
+            "tags": ["醫療", "標準", "FHIR"],
+            "default_include": False
+        },
+        {
+            "id": "kb_maint_decrease",
+            "title": "維運費用逐年遞減原則",
+            "body": (
+                "資訊系統之維運費用應逐年遞減，廠商報價如有增長，可請廠商於本案之期末報告提供系統使用效益指標，"
+                "做為次年維運費用成長之判斷。"
+            ),
+            "tags": ["維運", "費用", "逐年遞減"],
+            "default_include": True
+        },
+        {
+            "id": "kb_budget_sentence",
+            "title": "採購金額句型範本",
+            "body": "本案採購金額{BUDGET}萬元，{SUMMARY}。",
+            "tags": ["預算", "句型"],
+            "default_include": True
+        },
+    ]
+
+def load_kb() -> List[Dict[str, Any]]:
+    if not os.path.exists(KB_PATH):
+        return default_kb_items()
+    try:
+        with open(KB_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return default_kb_items()
+
+def save_kb(items: List[Dict[str, Any]]):
+    try:
+        with open(KB_PATH, 'w', encoding='utf-8') as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def kb_to_context(items: List[Dict[str, Any]], selected_ids: List[str]) -> str:
+    # 依選取項目組成上下文文字（不直接插入草稿，僅供 Prompt 參考）
+    picked = []
+    for it in items:
+        if it.get('id') in selected_ids or (it.get('default_include') and it.get('id') in selected_ids):
+            picked.append(f"- {it.get('title')}：{it.get('body')}")
+    return "\n".join(picked)
+
+# ==================== LLM 取得預算金額（萬元） ====================
+def llm_extract_budget(corpus_text: str) -> tuple[str, dict]:
+    """
+    由 LLM 從 RFP/契約全文抽取『本案採購/預算金額』，回傳萬元（字串）與 evidence。
+    失敗則回 ("XXX", {}).
+    """
+    prompt = f"""
+你是政府機關採購文件審查助理。請由下方『RFP/契約全文』中尋找最可能代表『本案採購/預算金額』的一處數字，
+並將其換算為『萬元』後回傳唯一 JSON 物件，格式如下，不要輸出任何其他文字：
+
+{{
+  "budget_million": "1200",           # 不含單位、只填數字字串；若找不到請填 "XXX"
+  "evidence": {{
+    "file": "檔名",
+    "page": 3,
+    "quote": "逐字引述（不超過200字）"
+  }}
+}}
+
+換算規則：新臺幣/NTD/NT$/元/萬/百萬/億 → 一律轉為『萬元』。
+若同時出現不同金額，優先挑選以「預算/經費/採購金額」等關鍵詞就近出現者。
+禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
+
+【RFP/契約全文（含檔名/頁碼標註）】
+{corpus_text}
+    """.strip()
+    try:
+        resp = model.generate_content(prompt)
+        data = json.loads(resp.text.strip())
+        val = str(data.get("budget_million", "")).strip()
+        if not val or not re.match(r"^\d+(?:\.\d+)?$", val):
+            return "XXX", {}
+        budget_str = str(int(round(float(val))))
+        ev = data.get("evidence") or {}
+        return budget_str, {"file": ev.get("file", ""), "page": ev.get("page", None), "quote": ev.get("quote", "")}
+    except Exception:
+        return "XXX", {}
+
+# ==================== LLM Prompt：建議回覆內容 ====================
+def make_reply_prompt(corpus_text: str, kb_context: str, budget_wan: str, work_summary: str, max_points: int) -> str:
+    return f"""
+你是政府機關資訊處之採購/RFP/契約審查委員，請用繁體中文撰寫『建議回覆內容』，風格需**正式、精簡、可直接貼用**，並以**編號條列**。
+請嚴格遵守：
+1) 第一點固定為：「本案採購金額{budget_wan}萬元」，若提供了工作摘要則補述，例如「工作內容為{work_summary}」。
+2) 第二點固定為：「資訊系統之維運費用應逐年遞減…」（見下方知識庫內容）。
+3) 其餘各點（最多 {max_points-2} 點）視文件差異或缺漏，給出**具體可操作**的補充/修正建議，避免空泛。
+4) 全文不得輸出任何聯絡資訊（姓名、電話、Email 等）。不得編造文件未載明之金額或人名。
+5) 僅輸出**條列文字**，不要加入前言、落款或致意。
+
+【可供參考之知識庫內容（僅作為上下文，不必逐字貼入）】
+{kb_context}
+
+【RFP/契約全文（含檔名/頁碼標註）】
+{corpus_text}
+    """.strip()
 
 # ==================== 解析/轉表工具 ====================
 def parse_json_array(text: str) -> List[Dict[str, Any]]:
@@ -358,48 +480,10 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         pass
     return out
 
-# ==================== LLM 取得預算金額（萬元） ====================
-def llm_extract_budget(corpus_text: str) -> tuple[str, dict]:
-    """
-    由 LLM 從 RFP/契約全文抽取『本案採購/預算金額』，回傳萬元（字串）與 evidence。
-    失敗則回 ("XXX", {}).
-    """
-    prompt = f"""
-你是政府機關採購文件審查助理。請由下方『RFP/契約全文』中尋找最可能代表『本案採購/預算金額』的一處數字，
-並將其換算為『萬元』後回傳唯一 JSON 物件，格式如下，不要輸出任何其他文字：
-
-{{
-  "budget_million": "1200",           # 不含單位、只填數字字串；若找不到請填 "XXX"
-  "evidence": {{
-    "file": "檔名",
-    "page": 3,
-    "quote": "逐字引述（不超過200字）"
-  }}
-}}
-
-換算規則：新臺幣/NTD/NT$/元/萬/百萬/億 → 一律轉為『萬元』。
-若同時出現不同金額，優先挑選以「預算/經費/採購金額」等關鍵詞就近出現者。
-禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
-
-【RFP/契約全文（含檔名/頁碼標註）】
-{corpus_text}
-    """.strip()
-    try:
-        resp = model.generate_content(prompt)
-        data = json.loads(resp.text.strip())
-        val = str(data.get("budget_million", "")).strip()
-        if not val or not re.match(r"^\d+(?:\.\d+)?$", val):
-            return "XXX", {}
-        budget_str = str(int(round(float(val))))
-        ev = data.get("evidence") or {}
-        return budget_str, {"file": ev.get("file", ""), "page": ev.get("page", None), "quote": ev.get("quote", "")}
-    except Exception:
-        return "XXX", {}
-
 # ==================== 主程式 ====================
 def main():
-    st.set_page_config("📑 資訊服務採購 RFP/契約審查系統(測試版)", layout="wide")
-    st.title("📑 資訊服務採購 RFP/契約審查系統(測試版)")
+    st.set_page_config("📑 資訊服務採購 RFP/契約審查系統(LLM版)", layout="wide")
+    st.title("📑 資訊服務採購 RFP/契約審查系統(LLM版)")
 
     # RFP/契約 PDF（必填）
     uploaded_files = st.file_uploader("📥 上傳 RFP/契約 PDF（可複選）", type=["pdf"], accept_multiple_files=True)
@@ -408,8 +492,51 @@ def main():
 
     project_name = st.text_input("案件/專案名稱（將用於檔名）", value="未命名案件")
 
-    # 檢核模式固定為一次性審查（暫停批次與逐題）
     st.caption("檢核模式：一次性審查（暫停批次/逐題）")
+
+    # --- 知識庫管理 ---
+    st.sidebar.header("📚 知識庫管理")
+    kb_items = load_kb()
+    # 顯示現有 KB
+    with st.sidebar.expander("現有知識庫項目", expanded=True):
+        for i, it in enumerate(kb_items):
+            st.text(f"[{it.get('id')}] {it.get('title')}")
+        if st.button("💾 儲存知識庫（JSON）"):
+            save_kb(kb_items)
+            st.sidebar.success("已儲存 kb_store.json")
+
+    # 新增 KB 項目
+    with st.sidebar.expander("➕ 新增知識庫項目", expanded=False):
+        new_title = st.text_input("標題")
+        new_body = st.text_area("內容")
+        new_tags = st.text_input("標籤（以逗號分隔）")
+        new_default = st.checkbox("預設納入 Prompt", value=False)
+        if st.button("新增知識庫項目") and new_title.strip() and new_body.strip():
+            new_id = f"kb_{len(kb_items)+1}"
+            kb_items.append({"id": new_id, "title": new_title.strip(), "body": new_body.strip(),
+                             "tags": [t.strip() for t in new_tags.split(',') if t.strip()],
+                             "default_include": new_default})
+            save_kb(kb_items)
+            st.sidebar.success(f"已新增：{new_title}")
+
+    # 上傳歷史回覆，建立 KB 項目
+    with st.sidebar.expander("📤 上傳歷史回覆（txt/md/json/pdf）→ 建立KB", expanded=False):
+        kb_uploads = st.file_uploader("選擇檔案", type=["txt","md","json","pdf"], accept_multiple_files=True, key="kb_up")
+        if kb_uploads:
+            for f in kb_uploads:
+                try:
+                    if is_pdf(f.name):
+                        doc = fitz.open(stream=f.read(), filetype='pdf')
+                        text = "\n\n".join([p.get_text('text').strip() for p in doc])
+                    else:
+                        text = f.read().decode('utf-8', errors='ignore')
+                    new_id = f"kb_{len(kb_items)+1}"
+                    kb_items.append({"id": new_id, "title": f"歷史回覆：{f.name}", "body": text[:4000],
+                                     "tags": ["歷史回覆"], "default_include": False})
+                except Exception as e:
+                    st.sidebar.warning(f"{f.name} 解析失敗：{e}")
+            save_kb(kb_items)
+            st.sidebar.success("已建立 KB 項目（取前4,000字作為內容）")
 
     if st.button("🚀 開始審查", disabled=not uploaded_files):
         checklist_all = build_rfp_checklist()
@@ -465,7 +592,7 @@ def main():
         # 3) 一次性審查
         all_results: List[Dict[str, Any]] = []
         st.info("🧪 執行系統檢核模式：一次性審查")
-        groups = group_items_by_ABCDE(checklist_all)
+        groups = [("ABCDE", checklist_all)] if checklist_all else []
         st.info("一次性審查中")
         total_batches = len(groups)
         for bi, (code, items) in enumerate(groups):
@@ -531,18 +658,10 @@ def main():
                 }
             )
 
-            # === 建議回覆內容（僅兩行；預算由 LLM 取得；不下載 Word） ===
-            st.subheader("📝 建議回覆內容（僅兩行）")
+            # === 建議回覆內容（LLM生成；可加入知識庫上下文） ===
+            st.subheader("📝 建議回覆內容（LLM生成）")
 
-            with st.expander("📎 固定參考項目（僅供參考，不自動寫入）", expanded=False):
-                st.markdown(
-                    """
-- **醫療資料內容**：請參閱本部醫療資訊大平台之醫療資訊標準，如 **FHIR、LOINC、SNOMED CT、RxNorm**，並符合三大 AI 中心、**SMART on FHIR** 等作業事項。另如有 **TWCDI** 及 **IG** 需求，可至該平台提案。
-- **檢核表**：已請**醫事司承辦人**酌修完畢制式文句檢核內容。
-                    """
-                )
-
-            # LLM 取得預算金額（萬元），使用者可覆蓋
+            # 由 LLM 抽取預算金額（萬元），可覆蓋
             budget_llm, budget_ev = llm_extract_budget(corpus_text)
             budget_million = st.text_input("預算金額（萬元；LLM辨識）", value=budget_llm or "XXX")
             if budget_ev:
@@ -551,22 +670,32 @@ def main():
                     src += f" p.{budget_ev.get('page')}"
                 st.caption(f"LLM 來源：{src} —— {budget_ev.get('quote','')}")
 
-            # 使用者可補充案件摘要（例如：建立醫政業務資料治理原則）
             work_summary = st.text_input("工作內容/案件摘要（選填）", value="")
+            max_points = st.slider("最多輸出條列點數（含前兩點固定）", min_value=2, max_value=8, value=4, step=1)
 
-            def build_reply_text_two_lines() -> str:
-                b = budget_million.strip() if budget_million.strip() else "XXX"
-                line1 = f"1. 本案採購金額{b}萬元"
-                if work_summary.strip():
-                    line1 += f"，工作內容為{work_summary.strip()}"
-                line1 += "。"
-                line2 = ("2. 資訊系統之維運費用應逐年遞減，廠商報價如有增長，"
-                         "可請廠商於本案之期末報告提供系統使用效益指標，做為次年維運費用成長之判斷。")
-                return "\n".join([line1, line2])
+            # 選擇要加入 Prompt 的知識庫
+            kb_ids = [it.get('id') for it in kb_items]
+            kb_titles = {it.get('id'): it.get('title') for it in kb_items}
+            default_sel = [it.get('id') for it in kb_items if it.get('default_include')]
+            selected_kb = st.multiselect("選擇欲納入 Prompt 的知識庫項目", options=kb_ids,
+                                         format_func=lambda x: kb_titles.get(x, x), default=default_sel)
+            kb_context = kb_to_context(kb_items, selected_kb)
 
-            if st.button("✍️ 產生回覆草稿", disabled=False):
-                reply_text = build_reply_text_two_lines()
-                st.text_area("回覆草稿（可複製）", reply_text, height=140)
+            # 產生 Prompt 並呼叫 LLM
+            if st.button("🤖 以 LLM 生成建議回覆內容", disabled=False):
+                prompt = make_reply_prompt(
+                    corpus_text=corpus_text,
+                    kb_context=kb_context,
+                    budget_wan=budget_million.strip() if budget_million.strip() else "XXX",
+                    work_summary=work_summary.strip(),
+                    max_points=max_points,
+                )
+                try:
+                    resp = model.generate_content(prompt)
+                    reply_text = (resp.text or "").strip()
+                    st.text_area("建議回覆內容（LLM輸出，可複製）", reply_text, height=220)
+                except Exception as e:
+                    st.warning(f"LLM 產生失敗：{e}")
 
         # 6) Excel 匯出（僅差異對照）
         try:
