@@ -948,7 +948,8 @@ def main():
                 doc.add_heading(f"{project_name}－建議回覆彙整", level=1)
                 p = doc.add_paragraph()
                 p.add_run(f"建立時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}").font.size = Pt(10)
-                df_reply = df[(df["建議回覆內容"].astype(str).str.strip()!="") & (~df["符合情形"].isin(["符合"])))]
+                df_reply = df[(df["建議回覆內容"].astype(str).str.strip() != "") & (~df["符合情形"].isin(["符合"]))]
+
                 for _, row in df_reply.iterrows():
                     doc.add_heading(f"{row['編號']}（{row['符合情形']}）", level=2)
                     if not simple_view:
