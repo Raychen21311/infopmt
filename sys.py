@@ -184,7 +184,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 - "status"（僅能【符合｜不適用】或空字串）
 - "biz_ref_note"（對應頁次/備註）
 - "std_id"（若能判定對應清單編號）
-Evidence 至少一筆：{{{"file":"...", "page": 頁碼, "quote":"..."}}}
+Evidence 至少一筆：{{"file":"...", "page": 頁碼, "quote":"..."}}
 禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
 【輸出格式 — 僅能輸出 JSON 陣列】
 [ {{ "id": "現況說明-1.(2)", "item": "...", "status": "符合", "biz_ref_note": "...", "std_id": "B1.2" }} ]
