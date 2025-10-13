@@ -1,34 +1,27 @@
 # -*- coding: utf-8 -*-
 """
-sys.py — RFP/契約 審查（資訊處檢核版） + 預先審查表（PDF 專用）
+sys.py — RFP/契約 審查（資訊處檢核版）
 
-此次調整（2025-10-13）：
-- 檢核模式：僅保留「一次性審查」，暫停批次與逐題模式。
-- 顯示內容：只保留「差異對照表」與「建議回覆內容」兩個區塊。
+此版重點（2025-10-13）：
+- 檢核模式：僅保留「一次性審查」。
+- 顯示：只保留「差異對照表」與「建議回覆內容」。
 - 建議回覆內容：
-  * 新增『預算金額』規則式抽取（依文件判斷，轉換為「萬元」並附來源檔名/頁碼/引句）。
-  * 固定參考項目（醫療資料標準、檢核表制式文句）以側邊展開顯示，預設不自動寫入草稿。
-  * 保留可下載 Word 草稿（.docx）。
+  * 僅輸出兩行重點（採購金額＋固定維運遞減句）。
+  * 預算金額由 LLM 從 RFP/契約全文搜尋抽取（轉為『萬元』）。
+  * 不取得案件性質、不下載 Word、不插入參考文字到草稿。
 - Excel 匯出：僅輸出「差異對照」工作表。
-
-保留原有流程：
-- 上傳 RFP/契約 PDF（可複選）→ 依檢核清單一次性審查。
-- 上傳「執行單位預先審查表」PDF（可複選/可略過）→ LLM 結構化抽取（顯示層面不再呈現，但用於差異對照）。
-
 """
 
 import os
 import re
 import json
 import io
-import unicodedata
 from typing import List, Dict, Any, Tuple
 
 import streamlit as st
 import fitz  # PyMuPDF
 import pandas as pd
 from difflib import SequenceMatcher
-from docx import Document
 
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -125,20 +118,6 @@ def build_rfp_checklist() -> List[Dict[str, Any]]:
 def group_items_by_ABCDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
     return [("ABCDE", items)] if items else []
 
-# 保留函式（目前不使用）
-def group_items_by_AB_CDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
-    ab = [it for it in items if it['id'] and it['id'][0] in ('A','B')]
-    cdef = [it for it in items if it['id'] and it['id'][0] in ('C','D','E','F')]
-    groups = []
-    if ab: groups.append(('AB', ab))
-    if cdef: groups.append(('CDEF', cdef))
-    return groups
-
-# 保留（逐題排序，目前不使用）
-def order_items_AB_C_D_E(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    order_map = {'A':0,'B':1,'C':2,'D':3,'E':4,'F':5}
-    return sorted(items, key=lambda it: (order_map.get(it['id'][0], 9), it['id']))
-
 # ==================== PDF 解析 ====================
 def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype='pdf')
@@ -161,15 +140,13 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
 2) 若屬不適用（例：未允許分包），請回「不適用」並說明依據。
 3) 務必引用原文短句與檔名/頁碼作為 evidence。
 4) ***嚴禁輸出任何與規格聯絡人、電話、姓名、聯繫方式有關的文字，即使原始文件內有。***
-5) 若 id = 'A1'，請回復"請檢視是否已附前案採購簽陳影本，以確保採購流程的延續性與合法性檢視基礎。"
-6) 若 id = 'A2.1、A2.2、A2.3 或 A2.4'，原則上預審表結果為不適用即為不適用，並提醒使用者再次核實。
-【輸出格式 — 僅能輸出 JSON 陣列，無任何多餘文字/標記】
+【輸出格式 — 僅能輸出 JSON 陣列】
 [
   {{
     "id": "A1",
     "category": "A 基本與前案",
-    "item": "條目原文（請完整複製）",
-    "compliance": "若 id = 'A0'：僅能輸出六選一【開發建置｜系統維運｜功能增修｜套裝軟體｜硬體｜其他】；若 id ≠ 'A0'：僅能輸出四選一【符合｜部分符合｜未提及｜不適用】；禁止同時輸出多個或其他文字",
+    "item": "條目原文（完整複製）",
+    "compliance": "若 id = 'A0'：六選一【開發建置｜系統維運｜功能增修｜套裝軟體｜硬體｜其他】；若 id ≠ 'A0'：四選一【符合｜部分符合｜未提及｜不適用】",
     "evidence": {{ "file": "檔名", "page": "頁碼", "quote": "逐字引述" }},
     "recommendation": "若未提及/部分符合，請給具體補強方向；否則留空"
   }}
@@ -180,24 +157,18 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
 {corpus_text}
 """.strip()
 
-def make_single_prompt(item: Dict[str, Any], corpus_text: str) -> str:
-    return make_batch_prompt(item['id'], [item], corpus_text)
-
 def make_precheck_parse_prompt(corpus_text: str) -> str:
     return f"""
 你是政府機關資訊處之採購審查助理。以下是一份或多份「執行單位預先審查表」的 PDF 文字（已標註檔名與頁碼）。
-請將表格/條列逐列轉為 **JSON 陣列**，每列一筆，欄位如下（顯示僅用到前五欄，其餘僅供判斷用）：
-【顯示用必填 5 欄】
-- "id": 先填你能辨識的粗編號（如「案件性質-1.」「現況說明-1.(2)」「A2.3」等；若無可留空）
-- "item": 檢核項目（擷取要點，不要省略）
-- "status": 僅能輸出二選一【符合｜不適用】；若該列未勾選任何選項，請輸出空字串 ""
-- "biz_ref_note": 對應頁次或補充說明
-【輔助判斷欄（可缺漏）】
-- "section_title"、"main_no"、"sub_no"、"std_id"、- "evidence": 每列至少一筆：{{"file": 檔名, "page": 頁碼, "quote": 引述短句}}
-【重要版面規則（請嚴格遵循）】略（同原規則）
-【A0 特例（多選）】略（同原規則）
-【安全規範】禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
-【輸出格式 — 僅能輸出 JSON 陣列，無多餘文字】
+請將表格/條列逐列轉為 **JSON 陣列**，每列一筆，僅輸出下列欄位：
+- "id"（粗編號，可空）
+- "item"（檢核項目）
+- "status"（僅能【符合｜不適用】或空字串）
+- "biz_ref_note"（對應頁次/備註）
+- "std_id"（若能判定對應清單編號）
+Evidence 至少一筆：{{{"file":"...", "page": 頁碼, "quote":"..."}}}
+禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
+【輸出格式 — 僅能輸出 JSON 陣列】
 [ {{ "id": "現況說明-1.(2)", "item": "...", "status": "符合", "biz_ref_note": "...", "std_id": "B1.2" }} ]
 【文件全文（含檔名/頁碼標註）】
 {corpus_text}
@@ -206,10 +177,8 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 # ==================== 解析/轉表工具 ====================
 def parse_json_array(text: str) -> List[Dict[str, Any]]:
     t = (text or "").strip()
-    # 去除可能的 ```json 包裹
     t = re.sub(r'^```(?:json)?', '', t, flags=re.I).strip()
     t = re.sub(r'```$', '', t, flags=re.I).strip()
-    # 嘗試擷取最外層陣列
     start = t.find('['); end = t.rfind(']')
     if start != -1 and end != -1 and end > start:
         t = t[start:end+1]
@@ -221,17 +190,6 @@ def parse_json_array(text: str) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-def _format_evidence_list(e_list: List[Dict[str, Any]]) -> str:
-    lines = []
-    for e in e_list or []:
-        file = e.get('file','')
-        page = e.get('page', None)
-        quote = e.get('quote','')
-        tag = f"p.{page}" if page not in (None, "", "n/a") else ""
-        lines.append(f"{file} {tag}：{quote}".strip())
-    return "\n".join(lines)
-
-# 預審狀態正規化（兩態→四態比對用）
 def normalize_status_equiv(s: str) -> str:
     if s is None: return "未提及"
     t = re.sub(r"\s+", "", str(s)).lower()
@@ -240,61 +198,43 @@ def normalize_status_equiv(s: str) -> str:
     if t in ("不適用", "na", "n/a"): return "不適用"
     return "未提及"
 
-SECTION_TO_LETTER = {
-    "案件性質": "A",
-    "現況說明": "B",
-    "資安需求": "C",
-    "作業需求": "D",
-    "產品交付": "E",
-    "其他重點": "F",
-}
-ROMAN_TO_LETTER = {"一":"A","二":"B","三":"C","四":"D","五":"E","六":"F"}
 STD_ID_PATTERN = re.compile(r"^[A-F]\d+(?:\.\d+)?$")
+SECTION_TO_LETTER = {"案件性質":"A","現況說明":"B","資安需求":"C","作業需求":"D","產品交付":"E","其他重點":"F"}
+ROMAN_TO_LETTER = {"一":"A","二":"B","三":"C","四":"D","五":"E","六":"F"}
 
 def compute_std_id(raw_id: str, item: str) -> str:
     s = (raw_id or "").strip()
     if STD_ID_PATTERN.match(s):
         return s
     src = f"{raw_id} {item}".strip()
-    sec_letter = ""
+    sec = ""
     for zh, letter in SECTION_TO_LETTER.items():
         if zh in src:
-            sec_letter = letter; break
-    if not sec_letter:
+            sec = letter; break
+    if not sec:
         for zh, letter in ROMAN_TO_LETTER.items():
             if f"{zh}、" in src or f"{zh} " in src:
-                sec_letter = letter; break
-    # 抓主號/次號（簡化版）
-    m_main = re.search(r"-(\d+)", raw_id or "") or re.search(r"(\d+)", src)
-    n1 = m_main.group(1) if m_main else None
-    m_sub = re.search(r"\((\d+)\)", src)
-    n2 = m_sub.group(1) if m_sub else None
-    if sec_letter and n1:
-        return f"{sec_letter}{n1}" + (f".{n2}" if n2 else "")
+                sec = letter; break
+    m1 = re.search(r"-(\d+)", raw_id or "") or re.search(r"(\d+)", src)
+    n1 = m1.group(1) if m1 else None
+    m2 = re.search(r"\((\d+)\)", src)
+    n2 = m2.group(1) if m2 else None
+    if sec and n1:
+        return f"{sec}{n1}" + (f".{n2}" if n2 else "")
     return ""
 
-# 解析預審 JSON → 製作 5 欄顯示表（目前僅供差異對照，UI不顯示）
 def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
     data = parse_json_array(text)
     rows = []
     for r in data if isinstance(data, list) else []:
         if not isinstance(r, dict):
             continue
-        ev = []
-        for e in r.get("evidence", []) or []:
-            if not isinstance(e, dict):
-                continue
-            ev.append({"file": e.get("file",""), "page": e.get("page", None), "quote": e.get("quote","")})
         rows.append({
             "raw_id": (r.get("id","") or "").strip(),
             "item": (r.get("item","") or "").strip(),
             "status": (r.get("status","") or "").strip(),
             "biz_ref_note": (r.get("biz_ref_note","") or "").strip(),
-            "section_title": (r.get("section_title","") or "").strip(),
-            "main_no": r.get("main_no", None),
-            "sub_no": r.get("sub_no", None),
             "std_id": (r.get("std_id","") or "").strip(),
-            "evidence": ev,
         })
     return rows
 
@@ -312,8 +252,6 @@ def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
         "對應頁次/備註": [r.get("biz_ref_note","") for r in rows],
     })
     df["_預審等價級_隱藏"] = df["預審判定"].apply(normalize_status_equiv)
-    df["_raw_id_隱藏"] = [r.get("raw_id","") for r in rows]
-    df["_section_隱藏"] = [r.get("section_title","") for r in rows]
     return df
 
 # ==================== 系統檢核 → DataFrame ====================
@@ -329,7 +267,6 @@ def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
             "改善建議": r.get("recommendation",""),
         })
     df = pd.DataFrame(rows)
-    # 友善排序（A→B→C→D→E→F）
     try:
         df["主碼"] = df["編號"].str.extract(r"([A-F])")
         df["子碼值"] = pd.to_numeric(df["編號"].str.extract(r"(\d+(?:\.\d+)?)")[0], errors='coerce')
@@ -364,19 +301,14 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         pitem = str(prow.get("檢核項目",""))
         pori = str(prow.get("預審判定",""))
         peq = str(prow.get("_預審等價級_隱藏",""))
-        matched = None
-        matched_id = ""
-        if pid and pid in sys_idx:
-            matched = sys_idx[pid]; matched_id = pid
-        else:
+        matched = sys_idx.get(pid)
+        matched_id = pid
+        if not matched:
             best_id, best_ratio = fuzzy_match(list(sys_idx.keys()), pid or pitem)
             if best_ratio >= 0.85 and best_id in sys_idx:
                 matched = sys_idx[best_id]; matched_id = best_id
         if matched:
-            if matched_id == "A0":
-                diff = "一致" if pori.strip() == str(matched.get("符合情形","")) else "不一致"
-            else:
-                diff = "一致" if matched.get("符合情形","") == peq else "不一致"
+            diff = "一致" if matched.get("符合情形","") == peq else "不一致"
             rows_out.append({
                 "類別": matched.get("類別",""),
                 "編號": matched_id,
@@ -397,12 +329,12 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "預審等價級": peq or "未提及",
                 "系統檢核結果": "（無對應）",
                 "差異判定": "預審多出",
-                "差異說明/建議": "此預審項目在系統檢核清單中無直接對應；請人工確認是否需納入清單或為表述差異。",
+                "差異說明/建議": "此預審項目於系統檢核清單中無直接對應，請人工確認。",
                 "對應頁次/備註": prow.get("對應頁次/備註",""),
             })
     pre_ids = set([str(x).strip() for x in pre_df.get("編號", pd.Series(dtype=str)).tolist() if str(x).strip()])
     for _, srow in sys_df.iterrows():
-        sid = str(srow.get("編號","")).strip()
+        sid = str(srow.get("編號",""))
         if sid and sid not in pre_ids:
             rows_out.append({
                 "類別": srow.get("類別",""),
@@ -412,7 +344,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "預審等價級": "未提及",
                 "系統檢核結果": srow.get("符合情形",""),
                 "差異判定": "系統多出",
-                "差異說明/建議": "預審未涵蓋此系統檢核項目，建議補列或於會審時提示承辦注意。",
+                "差異說明/建議": "預審未涵蓋此項，建議補列或於會審時提示承辦注意。",
                 "對應頁次/備註": "",
             })
     out = pd.DataFrame(rows_out)
@@ -426,68 +358,43 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         pass
     return out
 
-# ==================== 表格渲染（保留工具，現階段只用 data_editor） ====================
-def render_wrapped_table(df: pd.DataFrame, height_vh: int = 80):
-    df2 = df.copy()
-    for c in df2.columns:
-        df2[c] = df2[c].astype(str).str.replace('\n','<br>')
-    style = f"""
-    <style>
-    .wrap-table-container {{max-height:{height_vh}vh; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;}}
-    .wrap-table-container table {{width:100%; border-collapse:collapse; table-layout:fixed; font-size:14px;}}
-    .wrap-table-container th, .wrap-table-container td {{border:1px solid #efefef; padding:6px 10px; text-align:left; vertical-align:top; white-space:pre-wrap; word-break:break-word;}}
-    .wrap-table-container thead th {{position:sticky; top:0; background:#fafafa; z-index:1;}}
-    </style>
+# ==================== LLM 取得預算金額（萬元） ====================
+def llm_extract_budget(corpus_text: str) -> tuple[str, dict]:
     """
-    st.markdown(style, unsafe_allow_html=True)
-    html = df2.to_html(index=False, escape=False)
-    st.markdown(f'<div class="wrap-table-container">{html}</div>', unsafe_allow_html=True)
-
-# ==================== 規則式抽取：預算金額（轉為萬元；附來源） ====================
-BUDGET_HINT_PAT = re.compile(r"(預算|經費|採購預算|總預算|預算金額|預估金額|核定經費)", re.I)
-MONEY_PAT = re.compile(r"(新[臺台]幣|NTD|NT\$)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+(?:\.[0-9]+)?)\s*(億|百萬|萬元|萬|元)", re.I)
-
-def _to_wan(num_str: str, unit: str) -> float:
-    n = float(str(num_str).replace(",", ""))
-    u = unit.strip()
-    if "億" in u:
-        return n * 10000.0
-    if "百萬" in u:
-        return n * 100.0
-    if "萬元" in u or u == "萬":
-        return n
-    return n / 10000.0  # 元
-
-def detect_budget_million(corpus_text: str):
+    由 LLM 從 RFP/契約全文抽取『本案採購/預算金額』，回傳萬元（字串）與 evidence。
+    失敗則回 ("XXX", {}).
     """
-    從含【檔名/頁碼】標註的全文中找出最可能的預算金額（萬元）與證據。
-    回傳: (budget_wan:int|None, file:str|None, page:int|None, quote:str|None)
-    """
-    # 依 extract_text_with_headers 格式分塊
-    blocks = re.split(r"\n+===== 【檔案: \s*(.*?)\s* 頁: \s*(\d+)】 =====\n", corpus_text)
-    best = {"score": 0, "wan": None, "file": None, "page": None, "quote": None}
-    def _score(has_hint: bool, wan: float):
-        return (2.0 if has_hint else 1.0) + (min(wan, 50000.0) / 50000.0)
-    i = 1
-    while i + 2 < len(blocks):
-        fname, pno, text = blocks[i], blocks[i+1], blocks[i+2]
-        try:
-            page = int(pno)
-        except Exception:
-            page = None
-        lines = [x.strip() for x in (text or "").splitlines() if x.strip()]
-        for ln in lines:
-            has_hint = bool(BUDGET_HINT_PAT.search(ln))
-            for m in MONEY_PAT.finditer(ln):
-                unit = m.group(3) or ""
-                wan = _to_wan(m.group(2), unit)
-                sc = _score(has_hint, wan)
-                if sc > best["score"]:
-                    best = {"score": sc, "wan": wan, "file": fname, "page": page, "quote": ln[:200]}
-        i += 3
-    if best["wan"] is None:
-        return None, None, None, None
-    return int(round(best["wan"])), best["file"], best["page"], best["quote"]
+    prompt = f"""
+你是政府機關採購文件審查助理。請由下方『RFP/契約全文』中尋找最可能代表『本案採購/預算金額』的一處數字，
+並將其換算為『萬元』後回傳唯一 JSON 物件，格式如下，不要輸出任何其他文字：
+
+{{
+  "budget_million": "1200",           # 不含單位、只填數字字串；若找不到請填 "XXX"
+  "evidence": {{
+    "file": "檔名",
+    "page": 3,
+    "quote": "逐字引述（不超過200字）"
+  }}
+}}
+
+換算規則：新臺幣/NTD/NT$/元/萬/百萬/億 → 一律轉為『萬元』。
+若同時出現不同金額，優先挑選以「預算/經費/採購金額」等關鍵詞就近出現者。
+禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
+
+【RFP/契約全文（含檔名/頁碼標註）】
+{corpus_text}
+    """.strip()
+    try:
+        resp = model.generate_content(prompt)
+        data = json.loads(resp.text.strip())
+        val = str(data.get("budget_million", "")).strip()
+        if not val or not re.match(r"^\d+(?:\.\d+)?$", val):
+            return "XXX", {}
+        budget_str = str(int(round(float(val))))
+        ev = data.get("evidence") or {}
+        return budget_str, {"file": ev.get("file", ""), "page": ev.get("page", None), "quote": ev.get("quote", "")}
+    except Exception:
+        return "XXX", {}
 
 # ==================== 主程式 ====================
 def main():
@@ -506,7 +413,6 @@ def main():
 
     if st.button("🚀 開始審查", disabled=not uploaded_files):
         checklist_all = build_rfp_checklist()
-        # 進度條
         progress_text = st.empty(); progress_bar = st.progress(0)
         def set_progress(p, msg):
             progress_bar.progress(max(0, min(int(p), 100))); progress_text.write(msg)
@@ -525,10 +431,7 @@ def main():
             corpora.append(text)
         corpus_text = "\n\n".join(corpora)
 
-        # 1.1) 自動擷取預算金額（萬元）
-        auto_budget_wan, auto_budget_file, auto_budget_page, auto_budget_quote = detect_budget_million(corpus_text)
-
-        # 2) 解析 預先審查表 PDF（可略過；UI不顯示，僅供差異對照）
+        # 2) 解析 預先審查表（可略過；UI不顯示，僅供差異對照）
         set_progress(32, "🧩 處理預先審查表…")
         pre_df = pd.DataFrame()
         if pre_files:
@@ -549,15 +452,13 @@ def main():
                 try:
                     st.info("🤖 呼叫模型進行預審表結構化辨識…")
                     resp = model.generate_content(prompt)
-                    st.info("📦 解析模型回傳的 JSON 結構…")
                     rows = parse_precheck_json(resp.text)
                     if rows:
-                        st.info("📊 將預審表轉為 DataFrame 表格…")
                         pre_df = precheck_rows_to_df(rows)
                 except Exception as e:
-                    st.warning(f"⚠️ 預審表解析失敗：{e}，請稍後重試或改上傳另一份 PDF。")
+                    st.warning(f"⚠️ 預審表解析失敗：{e}")
         else:
-            st.info("ℹ️ 未上傳或未成功辨識任何預審表內容.")
+            st.info("ℹ️ 未上傳或未成功辨識任何預審表內容。")
 
         set_progress(35, "🧠 檢核準備中…")
 
@@ -630,79 +531,42 @@ def main():
                 }
             )
 
-            # === 建議回覆內容（不呼叫 LLM；加入預算抽取與固定參考項目） ===
-            st.subheader("📝 建議回覆內容")
+            # === 建議回覆內容（僅兩行；預算由 LLM 取得；不下載 Word） ===
+            st.subheader("📝 建議回覆內容（僅兩行）")
 
-            with st.expander("📎 固定參考項目（僅供參考，不自動寫入草稿）", expanded=False):
+            with st.expander("📎 固定參考項目（僅供參考，不自動寫入）", expanded=False):
                 st.markdown(
                     """
 - **醫療資料內容**：請參閱本部醫療資訊大平台之醫療資訊標準，如 **FHIR、LOINC、SNOMED CT、RxNorm**，並符合三大 AI 中心、**SMART on FHIR** 等作業事項。另如有 **TWCDI** 及 **IG** 需求，可至該平台提案。
 - **檢核表**：已請**醫事司承辦人**酌修完畢制式文句檢核內容。
                     """
                 )
-                ref_insert = st.checkbox("（可選）將以上參考文字插入回覆草稿結尾", value=False)
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                audience = st.selectbox("對象", ["承辦", "執行單位", "廠商"])
-            with col2:
-                tone = st.selectbox("口吻", ["正式", "中性", "友善"], index=0)
-            with col3:
-                purpose = st.selectbox("目的", ["補件通知", "契約修正建議", "RFP內容補充", "技術澄清"], index=0)
+            # LLM 取得預算金額（萬元），使用者可覆蓋
+            budget_llm, budget_ev = llm_extract_budget(corpus_text)
+            budget_million = st.text_input("預算金額（萬元；LLM辨識）", value=budget_llm or "XXX")
+            if budget_ev:
+                src = f"{budget_ev.get('file','')}"
+                if budget_ev.get("page") not in (None, "", "n/a"):
+                    src += f" p.{budget_ev.get('page')}"
+                st.caption(f"LLM 來源：{src} —— {budget_ev.get('quote','')}")
 
-            include_evidence = st.checkbox("每點後附『對應頁次/備註』（檔名/頁碼）", value=True)
-            default_budget = str(auto_budget_wan) if auto_budget_wan is not None else "XXX"
-            budget_million = st.text_input("預算金額（萬元；依文件判斷，未辨識則用 XXX）", value=default_budget)
-            if auto_budget_wan is not None:
-                st.caption(f"自動擷取來源：{auto_budget_file} p.{auto_budget_page} —— {auto_budget_quote}")
-            force_common_items = st.checkbox("在結尾加入『必列事項』兩點", value=True)
+            # 使用者可補充案件摘要（例如：建立醫政業務資料治理原則）
+            work_summary = st.text_input("工作內容/案件摘要（選填）", value="")
 
-            def build_reply_text_from_diff(_df: pd.DataFrame) -> str:
-                lines = []
-                lines.append(f"主旨：請協助{purpose}相關事項（{audience}）。")
-                lines.append("說明：為確保採購文件之完整性與合規性，依本處檢核與預審對照結果，請協助補充/修正下列事項：")
-                lines.append("請求事項：")
-                for _, r in _df.iterrows():
-                    item = str(r.get("檢核項目（系統基準）", "")).strip()
-                    rec  = str(r.get("差異說明/建議", "")).strip()
-                    ev   = str(r.get("對應頁次/備註", "")).strip()
-                    ev_part = f"（參考：{ev}）" if include_evidence and ev else ""
-                    lines.append(f"．[{r['編號']}] {item} —— 建議：{rec}{ev_part}")
+            def build_reply_text_two_lines() -> str:
+                b = budget_million.strip() if budget_million.strip() else "XXX"
+                line1 = f"1. 本案採購金額{b}萬元"
+                if work_summary.strip():
+                    line1 += f"，工作內容為{work_summary.strip()}"
+                line1 += "。"
+                line2 = ("2. 資訊系統之維運費用應逐年遞減，廠商報價如有增長，"
+                         "可請廠商於本案之期末報告提供系統使用效益指標，做為次年維運費用成長之判斷。")
+                return "\n".join([line1, line2])
 
-                if force_common_items:
-                    b = budget_million.strip() if budget_million.strip() else "XXX"
-                    lines.append("")
-                    lines.append("必列事項：")
-                    lines.append(f"1. 本案預算金額{b}萬元，包含系統維運、功能增修等。")
-                    lines.append("2. 資訊系統之維運費用應逐年遞減，廠商報價如有增長，可請廠商於本案之期末報告提供系統使用效益指標，做為次年維運費用成長之判斷。")
-
-                if ref_insert:
-                    lines.append("")
-                    lines.append("參考事項：")
-                    lines.append("－ 醫療資料內容：請參閱本部醫療資訊大平台之醫療資訊標準，如 FHIR、LOINC、SNOMED CT、RxNorm，並符合三大 AI 中心、SMART on FHIR 等作業事項。另如有 TWCDI 及 IG 需求，可至該平台提案。")
-                    lines.append("－ 檢核表：已請醫事司承辦人酌修完畢制式文句檢核內容。")
-
-                return "\n".join(lines)
-
-            if st.button("✍️ 產生回覆草稿", disabled=view_df.empty):
-                reply_text = build_reply_text_from_diff(view_df)
-                st.text_area("回覆草稿（可複製）", reply_text, height=320)
-
-                # 下載 Word
-                def _build_reply_docx(text: str, title: str):
-                    doc = Document()
-                    doc.add_heading(f"{title} 建議回覆內容", level=1)
-                    for line in text.split("\n"):
-                        p = doc.add_paragraph(line)
-                        p.paragraph_format.line_spacing = 1.5
-                    bio = io.BytesIO(); doc.save(bio); bio.seek(0); return bio
-                bio = _build_reply_docx(reply_text, project_name)
-                st.download_button(
-                    "⬇️ 下載 Word 回覆草稿 (.docx)",
-                    data=bio.getvalue(),
-                    file_name=f"{project_name}_建議回覆內容.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
+            if st.button("✍️ 產生回覆草稿", disabled=False):
+                reply_text = build_reply_text_two_lines()
+                st.text_area("回覆草稿（可複製）", reply_text, height=140)
 
         # 6) Excel 匯出（僅差異對照）
         try:
@@ -717,7 +581,6 @@ def main():
                         for cell in row:
                             cell.alignment = Alignment(wrap_text=True, vertical='top')
                 else:
-                    # 若無預審或無差異，仍輸出空表以利歸檔
                     empty_df = pd.DataFrame(columns=["類別","編號","檢核項目（系統基準）","預審判定（原字）","對應頁次/備註","系統檢核結果","差異說明/建議","差異判定"])
                     empty_df.to_excel(writer, index=False, sheet_name='差異對照')
             xbio.seek(0)
