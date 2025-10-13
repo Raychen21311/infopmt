@@ -193,7 +193,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 - "status": 僅能輸出二選一【符合｜不適用】；若該列未勾選任何選項，請輸出空字串 ""
 - "biz_ref_note": 對應頁次或補充說明
 【輔助判斷欄（可缺漏）】
-- "section_title"、"main_no"、"sub_no"、"std_id"、"evidence": 至少一筆：{"file":"...", "page": 頁碼, "quote":"..."}
+- "section_title"、"main_no"、"sub_no"、"std_id"、- "evidence": 每列至少一筆：{{"file": 檔名, "page": 頁碼, "quote": 引述短句}}
 【重要版面規則（請嚴格遵循）】略（同原規則）
 【A0 特例（多選）】略（同原規則）
 【安全規範】禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
