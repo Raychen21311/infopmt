@@ -971,3 +971,4 @@ def main():
         progress_text.empty(); progress_bar.empty()
 
 if __name__ == '__main__':
+    main()
