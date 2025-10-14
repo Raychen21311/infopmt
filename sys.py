@@ -37,8 +37,7 @@ if os.getenv('GOOGLE_API_KEY'):
     genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-# --------------------- 常數 ---------------------
-KB_PATH = 'kb_store.json'
+
 
 # --------------------- 檔案型態 ---------------------
 def is_pdf(name: str) -> bool:
@@ -181,120 +180,7 @@ Evidence 至少一筆：{{"file":"...", "page": 頁碼, "quote":"..."}}
 {corpus_text}
 """.strip()
 
-# ==================== 本地知識庫 ====================
-def default_kb_items() -> List[Dict[str, Any]]:
-    return [
-        {
-            "id": "kb_med_std",
-            "title": "醫療資料標準參考",
-            "body": (
-                "有關醫療資料內容，請參閱本部醫療資訊大平台之醫療資訊標準，如 FHIR、LOINC、SNOMED CT、RxNorm，"
-                "且符合三大AI中心、SMART on FHIR等作業事項。另如有TWCDI及IG需求，可至該平台提案。"
-            ),
-            "tags": ["醫療", "標準", "FHIR"],
-            "default_include": False
-        },
-        {
-            "id": "kb_maint_decrease",
-            "title": "維運費用逐年遞減原則",
-            "body": (
-                "資訊系統之維運費用應逐年遞減，廠商報價如有增長，可請廠商於本案之期末報告提供系統使用效益指標，"
-                "做為次年維運費用成長之判斷。"
-            ),
-            "tags": ["維運", "費用", "逐年遞減"],
-            "default_include": True
-        },
-        {
-            "id": "kb_budget_sentence",
-            "title": "採購金額句型範本",
-            "body": "本案採購金額{BUDGET}萬元，{SUMMARY}。",
-            "tags": ["預算", "句型"],
-            "default_include": True
-        },
-    ]
 
-def load_kb() -> List[Dict[str, Any]]:
-    if not os.path.exists(KB_PATH):
-        return default_kb_items()
-    try:
-        with open(KB_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return default_kb_items()
-
-def save_kb(items: List[Dict[str, Any]]):
-    try:
-        with open(KB_PATH, 'w', encoding='utf-8') as f:
-            json.dump(items, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-def kb_to_context(items: List[Dict[str, Any]], selected_ids: List[str]) -> str:
-    # 依選取項目組成上下文文字（不直接插入草稿，僅供 Prompt 參考）
-    picked = []
-    for it in items:
-        if it.get('id') in selected_ids or (it.get('default_include') and it.get('id') in selected_ids):
-            picked.append(f"- {it.get('title')}：{it.get('body')}")
-    return "\n".join(picked)
-
-# ==================== LLM 取得預算金額（萬元） ====================
-def llm_extract_budget(corpus_text: str) -> tuple[str, dict]:
-    """
-    由 LLM 從 RFP/契約全文抽取『本案採購/預算金額』，回傳萬元（字串）與 evidence。
-    失敗則回 ("XXX", {}).
-    """
-    prompt = f"""
-你是政府機關採購文件審查助理。請由下方『RFP/契約全文』中尋找最可能代表『本案採購/預算金額』的一處數字，
-並將其換算為『萬元』後回傳唯一 JSON 物件，格式如下，不要輸出任何其他文字：
-
-{{
-  "budget_million": "1200",           # 不含單位、只填數字字串；若找不到請填 "XXX"
-  "evidence": {{
-    "file": "檔名",
-    "page": 3,
-    "quote": "逐字引述（不超過200字）"
-  }}
-}}
-
-換算規則：新臺幣/NTD/NT$/元/萬/百萬/億 → 一律轉為『萬元』。
-若同時出現不同金額，優先挑選以「預算/經費/採購金額」等關鍵詞就近出現者。
-禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
-
-【RFP/契約全文（含檔名/頁碼標註）】
-{corpus_text}
-    """.strip()
-    try:
-        resp = model.generate_content(prompt)
-        data = json.loads(resp.text.strip())
-        val = str(data.get("budget_million", "")).strip()
-        if not val or not re.match(r"^\d+(?:\.\d+)?$", val):
-            return "XXX", {}
-        budget_str = str(int(round(float(val))))
-        ev = data.get("evidence") or {}
-        return budget_str, {"file": ev.get("file", ""), "page": ev.get("page", None), "quote": ev.get("quote", "")}
-    except Exception:
-        return "XXX", {}
-
-# ==================== LLM Prompt：建議回覆內容 ====================
-def make_reply_prompt(corpus_text: str, kb_context: str, budget_wan: str, work_summary: str, max_points: int) -> str:
-    return f"""
-你是政府機關資訊處之採購/RFP/契約審查委員，請用繁體中文撰寫『建議回覆內容』，風格需**正式、精簡、可直接貼用**，並以**編號條列**。
-請嚴格遵守：
-1) 第一點固定為：「本案採購金額{budget_wan}萬元」，若提供了工作摘要則補述，例如「工作內容為{work_summary}」。
-2) 第二點固定為：「資訊系統之維運費用應逐年遞減…」（見下方知識庫內容）。
-3) 其餘各點（最多 {max_points-2} 點）視文件差異或缺漏，給出**具體可操作**的補充/修正建議，避免空泛。
-4) 全文不得輸出任何聯絡資訊（姓名、電話、Email 等）。不得編造文件未載明之金額或人名。
-5) 僅輸出**條列文字**，不要加入前言、落款或致意。
-
-【可供參考之知識庫內容（僅作為上下文，不必逐字貼入）】
-{kb_context}
-
-【RFP/契約全文（含檔名/頁碼標註）】
-{corpus_text}
-    """.strip()
 
 # ==================== 解析/轉表工具 ====================
 def parse_json_array(text: str) -> List[Dict[str, Any]]:
