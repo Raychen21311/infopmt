@@ -449,29 +449,28 @@ def main():
         for bi, (code, items) in enumerate(groups):
             set_progress(35 + int((bi / max(1, total_batches)) * 55), f"🔎 一次性審查（{code}）… 共 {len(items)} 項")
             prompt = make_batch_prompt(code, items, corpus_text)
-            try:
-                resp = model.generate_content(prompt)
-                arr = parse_json_array(resp.text)
-            except Exception:
-                arr = []
-            allowed_ids = {it['id'] for it in items}
-            id_to_meta = {it['id']: it for it in items}
-            normalized = []
-            for d in arr if isinstance(arr, list) else []:
-                if not isinstance(d, dict):
-                    continue
-                rid = d.get('id')
-                if rid not in allowed_ids:
-                    continue
-                meta = id_to_meta[rid]
-                normalized.append({
-                    'id': rid,
-                    'category': d.get('category', meta['category']),
-                    'item': d.get('item', meta['item']),
-                    'compliance': d.get('compliance', ''),
-                    'evidence': d.get('evidence', []),
-                    'recommendation': d.get('recommendation', '')
-                })
+         try:
+          resp = model.generate_content(prompt)
+          arr = parse_json_array(resp.text)
+        except Exception:
+         arr = []
+         allowed_ids = {it['id'] for it in items}
+         id_to_meta = {it['id']: it for it in items}
+         normalized = []
+         for d in arr if isinstance(arr, list) else []:
+          if not isinstance(d, dict):
+           continue
+           rid = d.get('id')
+           if rid not in allowed_ids:
+            continue
+            meta = id_to_meta[rid]
+            normalized.append({
+             'id': rid,
+             'category': d.get('category', meta['category']),
+             'item': d.get('item', meta['item']),
+             'compliance': d.get('compliance', ''),
+             'evidence': d.get('evidence', []),
+             'recommendation': d.get('recommendation', '')})
             returned_ids = {x['id'] for x in normalized}
             for it in items:
                 if it['id'] not in returned_ids:
