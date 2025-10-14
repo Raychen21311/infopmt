@@ -518,12 +518,7 @@ def main():
     project_name = st.text_input("案件/專案名稱（將用於檔名）", value="未命名案件")
     work_summary = st.text_input("工作摘要（可選，用於第1點補述）", value="")
 
-    # 知識庫項目選擇（預設勾選 default_include=True 的項目）
-    kb_items = load_kb()
-    kb_options = {it['title']: it['id'] for it in kb_items}
-    default_kb_ids = [it['id'] for it in kb_items if it.get('default_include')]
-    selected_kb_titles = st.multiselect("知識庫項目（納入 Prompt 上下文）", options=list(kb_options.keys()), default=[t for t, i in kb_options.items() if i in default_kb_ids])
-    selected_kb_ids = [kb_options[t] for t in selected_kb_titles]
+    
 
     st.caption("檢核模式：一次性審查")
 
