@@ -560,3 +560,4 @@ def main():
         progress_bar.empty()
 
 if __name__ == '__main__':
+    main()
