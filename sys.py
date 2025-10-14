@@ -134,7 +134,7 @@ def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
     return "\n".join(parts)
 
 # ==================== LLM Prompts（檢核/預審解析） ====================
-def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text: str) -> str:
+def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]]) -> str:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
     return f"""
 你是政府機關資訊處之採購/RFP/契約審查委員。請依下列「檢核條目（{batch_code} 批）」逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
@@ -169,7 +169,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 - "status"（僅能【符合｜不適用】或空字串）
 - "biz_ref_note"（對應頁次/備註）
 - "std_id"（若能判定對應清單編號）
-Evidence 至少一筆：{{{"file":"...", "page": 頁碼, "quote":"..."}}}
+Evidence 至少一筆：{{"file":"...", "page": 頁碼, "quote":"..."}}
 禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
 【輸出格式 — 僅能輸出 JSON 陣列】
 [ {{ "id": "現況說明-1.(2)", "item": "...", "status": "符合", "biz_ref_note": "...", "std_id": "B1.2" }} ]
