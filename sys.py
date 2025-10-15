@@ -26,6 +26,7 @@ import streamlit as st
 import fitz  # PyMuPDF
 import pandas as pd
 from difflib import SequenceMatcher
+
 from dotenv import load_dotenv
 import google.generativeai as genai
 
@@ -34,6 +35,8 @@ load_dotenv()
 if os.getenv('GOOGLE_API_KEY'):
     genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 model = genai.GenerativeModel("gemini-2.5-flash")
+
+
 
 # --------------------- 檔案型態 ---------------------
 def is_pdf(name: str) -> bool:
@@ -45,7 +48,6 @@ def is_text(name: str) -> bool:
 # ==================== 檢核清單（含 F 其他重點） ====================
 def build_rfp_checklist() -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
-
     def add(cat, code, text):
         items.append({"category": cat, "id": code, "item": text})
 
@@ -134,7 +136,7 @@ def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
     return "\n".join(parts)
 
 # ==================== LLM Prompts（檢核/預審解析） ====================
-def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]]) -> str:
+def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text: str) -> str:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
     return f"""
 你是政府機關資訊處之採購/RFP/契約審查委員。請依下列「檢核條目（{batch_code} 批）」逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
@@ -177,13 +179,14 @@ Evidence 至少一筆：{{"file":"...", "page": 頁碼, "quote":"..."}}
 {corpus_text}
 """.strip()
 
+
+
 # ==================== 解析/轉表工具 ====================
 def parse_json_array(text: str) -> List[Dict[str, Any]]:
     t = (text or "").strip()
     t = re.sub(r'^```(?:json)?', '', t, flags=re.I).strip()
     t = re.sub(r'```$', '', t, flags=re.I).strip()
-    start = t.find('[')
-    end = t.rfind(']')
+    start = t.find('['); end = t.rfind(']')
     if start != -1 and end != -1 and end > start:
         t = t[start:end+1]
     try:
@@ -195,15 +198,11 @@ def parse_json_array(text: str) -> List[Dict[str, Any]]:
         return []
 
 def normalize_status_equiv(s: str) -> str:
-    if s is None:
-        return "未提及"
+    if s is None: return "未提及"
     t = re.sub(r"\s+", "", str(s)).lower()
-    if t == "":
-        return "未提及"
-    if t in ("符合", "ok", "pass", "通過"):
-        return "符合"
-    if t in ("不適用", "na", "n/a"):
-        return "不適用"
+    if t == "": return "未提及"
+    if t in ("符合", "ok", "pass", "通過"): return "符合"
+    if t in ("不適用", "na", "n/a"): return "不適用"
     return "未提及"
 
 STD_ID_PATTERN = re.compile(r"^[A-F]\d+(?:\.\d+)?$")
@@ -218,14 +217,12 @@ def compute_std_id(raw_id: str, item: str) -> str:
     sec = ""
     for zh, letter in SECTION_TO_LETTER.items():
         if zh in src:
-            sec = letter
-            break
+            sec = letter; break
     if not sec:
         for zh, letter in ROMAN_TO_LETTER.items():
             if f"{zh}、" in src or f"{zh} " in src:
-                sec = letter
-                break
-    m1 = re.search(r"-(\d+)", raw_id or "") or re.search(r"\((\d+)\)", src)
+                sec = letter; break
+    m1 = re.search(r"-(\d+)", raw_id or "") or re.search(r"(\d+)", src)
     n1 = m1.group(1) if m1 else None
     m2 = re.search(r"\((\d+)\)", src)
     n2 = m2.group(1) if m2 else None
@@ -278,8 +275,8 @@ def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
         })
     df = pd.DataFrame(rows)
     try:
-        df["主碼"] = df["編號"].str.extract(r"^([A-F])")
-        df["子碼值"] = pd.to_numeric(df["編號"].str.extract(r"^([A-F]\d+(?:\.\d+)?)")[0].str.replace(r"^[A-F]", "", regex=True), errors='coerce')
+        df["主碼"] = df["編號"].str.extract(r"([A-F])")
+        df["子碼值"] = pd.to_numeric(df["編號"].str.extract(r"(\d+(?:\.\d+)?)")[0], errors='coerce')
         code_order = {"A":0,"B":1,"C":2,"D":3,"E":4,"F":5}
         df["主序"] = df["主碼"].map(code_order).fillna(9)
         df = df.sort_values(["主序","子碼值","編號"], kind='mergesort').drop(columns=["主碼","子碼值","主序"])
@@ -302,7 +299,6 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         rid = str(row.get("編號", "")).strip()
         if rid:
             sys_idx[rid] = row.to_dict()
-
     rows_out: List[Dict[str, Any]] = []
     if "_預審等價級_隱藏" not in pre_df.columns:
         pre_df["_預審等價級_隱藏"] = pre_df["預審判定"].apply(normalize_status_equiv)
@@ -343,7 +339,6 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "差異說明/建議": "此預審項目於系統檢核清單中無直接對應，請人工確認。",
                 "對應頁次/備註": prow.get("對應頁次/備註",""),
             })
-
     pre_ids = set([str(x).strip() for x in pre_df.get("編號", pd.Series(dtype=str)).tolist() if str(x).strip()])
     for _, srow in sys_df.iterrows():
         sid = str(srow.get("編號",""))
@@ -359,11 +354,10 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "差異說明/建議": "預審未涵蓋此項，建議補列或於會審時提示承辦注意。",
                 "對應頁次/備註": "",
             })
-
     out = pd.DataFrame(rows_out)
     try:
-        out["主碼"] = out["編號"].str.extract(r"^([A-F])")
-        out["子碼值"] = pd.to_numeric(out["編號"].str.extract(r"^([A-F]\d+(?:\.\d+)?)")[0].str.replace(r"^[A-F]", "", regex=True), errors="coerce")
+        out["主碼"] = out["編號"].str.extract(r"([A-F])")
+        out["子碼值"] = pd.to_numeric(out["編號"].str.extract(r"(\d+(?:\.\d+)?)")[0], errors="coerce")
         code_order = {"A":0, "B":1, "C":2, "D":3, "E":4, "F":5}
         out["主序"] = out["主碼"].map(code_order).fillna(9)
         out = out.sort_values(["主序","子碼值","編號"], kind="mergesort").drop(columns=["主碼","子碼值","主序"])
@@ -385,23 +379,46 @@ def main():
 
     st.caption("檢核模式：一次性審查")
 
+
+
     if st.button("🚀 開始審查", disabled=not uploaded_files):
         checklist_all = build_rfp_checklist()
-        progress_text = st.empty()
-        progress_bar = st.progress(0)
+        progress_text = st.empty(); progress_bar = st.progress(0)
+        
+        # === 自動生成建議回覆內容 ===
+        st.subheader("📝 建議回覆內容（LLM自動生成）")
+     def make_reply_prompt(corpus_text: str) -> str:
+      return f"""
+      你是政府機關資訊處之採購/RFP/契約審查委員，請用繁體中文撰寫『建議回覆內容』，風格需正式、精簡、可直接貼用，並以編號條列。
+      請包含：
+      1) 本案採購金額（若文件中有提及，請引用並換算為萬元）。
+      2) 資訊系統之維運費用應逐年遞減，並於期末報告提供效益指標。
+      3) 其餘依文件差異或缺漏，給出具體補充/修正建議。
+      禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
+      僅輸出條列文字，不要加入前言或落款。
+     【RFP/契約全文】{corpus_text}""".strip()
+      try:
+       prompt = make_reply_prompt(corpus_text)
+       resp = model.generate_content(prompt)
+       reply_text = (resp.text or "").strip()
+       st.text_area("回覆內容（LLM輸出）", reply_text, height=300)
+      except Exception as e:
+       st.warning(f"LLM 產生失敗：{e}")
 
 
-        def set_progress(p, msg):
-            progress_bar.progress(max(0, min(int(p), 100)))
-            progress_text.write(msg)
 
-        # 1) 解析 RFP/契約 PDF
-        set_progress(5, "📄 解析與彙整 RFP/契約 文件文字…")
-        corpora = []
+
+
+        
+      def set_progress(p, msg):
+       progress_bar.progress(max(0, min(int(p), 100))); progress_text.write(msg)
+       # 1) 解析 RFP/契約 PDF
+       set_progress(5, "📄 解析與彙整 RFP/契約 文件文字…")
+       corpora = []
         total_files = len(uploaded_files)
         st.info("📄 開始解析 RFP/契約 PDF 檔案…")
         for i, f in enumerate(uploaded_files):
-            set_progress(int((i / max(1, total_files)) * 30), f"📄 解析 {f.name} ({i+1}/{total_files})…")
+            set_progress(int((i/max(1,total_files))*30), f"📄 解析 {f.name} ({i+1}/{total_files})…")
             pdf_bytes = f.read()
             text = extract_text_with_headers(pdf_bytes, f.name)
             if not text.strip():
@@ -435,8 +452,8 @@ def main():
                         pre_df = precheck_rows_to_df(rows)
                 except Exception as e:
                     st.warning(f"⚠️ 預審表解析失敗：{e}")
-            else:
-                st.info("ℹ️ 未上傳或未成功辨識任何預審表內容。")
+        else:
+            st.info("ℹ️ 未上傳或未成功辨識任何預審表內容。")
 
         set_progress(35, "🧠 檢核準備中…")
 
@@ -447,30 +464,31 @@ def main():
         st.info("一次性審查中")
         total_batches = len(groups)
         for bi, (code, items) in enumerate(groups):
-            set_progress(35 + int((bi / max(1, total_batches)) * 55), f"🔎 一次性審查（{code}）… 共 {len(items)} 項")
+            set_progress(35 + int((bi/max(1,total_batches))*55), f"🔎 一次性審查（{code}）… 共 {len(items)} 項")
             prompt = make_batch_prompt(code, items, corpus_text)
-         try:
-          resp = model.generate_content(prompt)
-          arr = parse_json_array(resp.text)
-        except Exception:
-         arr = []
-         allowed_ids = {it['id'] for it in items}
-         id_to_meta = {it['id']: it for it in items}
-         normalized = []
-         for d in arr if isinstance(arr, list) else []:
-          if not isinstance(d, dict):
-           continue
-           rid = d.get('id')
-           if rid not in allowed_ids:
-            continue
-            meta = id_to_meta[rid]
-            normalized.append({
-             'id': rid,
-             'category': d.get('category', meta['category']),
-             'item': d.get('item', meta['item']),
-             'compliance': d.get('compliance', ''),
-             'evidence': d.get('evidence', []),
-             'recommendation': d.get('recommendation', '')})
+            try:
+                resp = model.generate_content(prompt)
+                arr = parse_json_array(resp.text)
+            except Exception:
+                arr = []
+            allowed_ids = {it['id'] for it in items}
+            id_to_meta = {it['id']: it for it in items}
+            normalized = []
+            for d in arr if isinstance(arr, list) else []:
+                if not isinstance(d, dict):
+                    continue
+                rid = d.get('id')
+                if rid not in allowed_ids:
+                    continue
+                meta = id_to_meta[rid]
+                normalized.append({
+                    'id': rid,
+                    'category': d.get('category', meta['category']),
+                    'item': d.get('item', meta['item']),
+                    'compliance': d.get('compliance', ''),
+                    'evidence': d.get('evidence', []),
+                    'recommendation': d.get('recommendation', '')
+                })
             returned_ids = {x['id'] for x in normalized}
             for it in items:
                 if it['id'] not in returned_ids:
@@ -490,23 +508,23 @@ def main():
         if not pre_df.empty and not df.empty:
             st.info("📋 建立預審與系統檢核的差異對照表…")
             cmp_df = build_compare_table(sys_df=df, pre_df=pre_df)
-        st.subheader("🧾 差異對照表（只顯示不一致/缺漏）")
-        view_df = cmp_df[cmp_df["差異判定"] != "一致"]
-        cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應頁次/備註", "系統檢核結果", "差異說明/建議"]
-        view_df = view_df[cmp_display_cols]
-        search_term = st.text_input("🔍 搜尋檢核項目")
-        if search_term:
-            view_df = view_df[view_df["檢核項目（系統基準）"].str.contains(search_term, case=False, na=False)]
-        st.data_editor(
-            view_df,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["類別", "編號", "檢核項目（系統基準）", "系統檢核結果"],
-            column_config={
-                "預審判定（原字）": st.column_config.SelectboxColumn(
-                    "預審判定", options=["符合", "不適用", ""], required=False)
-            }
-        )
+            st.subheader("🧾 差異對照表（只顯示不一致/缺漏）")
+            view_df = cmp_df[cmp_df["差異判定"] != "一致"]
+            cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應頁次/備註", "系統檢核結果", "差異說明/建議"]
+            view_df = view_df[cmp_display_cols]
+            search_term = st.text_input("🔍 搜尋檢核項目")
+            if search_term:
+                view_df = view_df[view_df["檢核項目（系統基準）"].str.contains(search_term, case=False, na=False)]
+            st.data_editor(
+                view_df,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["類別", "編號", "檢核項目（系統基準）", "系統檢核結果"],
+                column_config={
+                    "預審判定（原字）": st.column_config.SelectboxColumn(
+                        "預審判定", options=["符合", "不適用", ""], required=False)
+                }
+            )
 
         # 6) Excel 匯出（僅差異對照）
         try:
@@ -533,33 +551,7 @@ def main():
         except Exception as e:
             st.warning(f"Excel 匯出失敗：{e}")
 
-        progress_text.empty()
-        progress_bar.empty()
-
-
-        # === 自動生成建議回覆內容 ===
-        st.subheader("📝 建議回覆內容（LLM自動生成）")
-
-        def make_reply_prompt(corpus_text: str) -> str:
-            return f"""
- 你是政府機關資訊處之採購/RFP/契約審查委員，請用繁體中文撰寫『建議回覆內容』，風格需正式、精簡、可直接貼用，並以編號條列。
- 請包含：
- 1) 本案採購金額（若文件中有提及，請引用並換算為萬元）。
- 2) 資訊系統之維運費用應逐年遞減，並於期末報告提供效益指標。
- 3) 其餘依文件差異或缺漏，給出具體補充/修正建議。
- 禁止輸出任何聯絡資訊（姓名、電話、Email 等）。
- 僅輸出條列文字，不要加入前言或落款。
- 【RFP/契約全文】{corpus_text}""".strip()
-
-        try:
-            # 注意：此段保留原邏輯（僅縮排），未改動
-            prompt = make_reply_prompt(corpus_text)  # corpus_text 於下方解析後定義
-            resp = model.generate_content(prompt)
-            reply_text = (resp.text or "").strip()
-            st.text_area("回覆內容（LLM輸出）", reply_text, height=300)
-        except Exception as e:
-            st.warning(f"LLM 產生失敗：{e}")
-
+        progress_text.empty(); progress_bar.empty()
 
 if __name__ == '__main__':
     main()
