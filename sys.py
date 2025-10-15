@@ -610,20 +610,20 @@ def render_wrapped_table(df: pd.DataFrame, height_vh: int = 80):
 
 # ==================== 主程式 ====================
 def main():
-    st.set_page_config("📑 資訊服務採購 RFP/契約審查系統(測試版)", layout="wide")
-    st.title("📑 資訊服務採購 RFP/契約審查系統(測試版)")
+    st.set_page_config("📑 會辦資訊處採購簽審查系統(測試版)", layout="wide")
+    st.title("📑  會辦資訊處採購簽審查系統(測試版)")
 
     # RFP/契約 PDF（必填）
-    uploaded_files = st.file_uploader("📥 上傳 RFP/契約 PDF（可複選）", type=["pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("一、📥 上傳 RFP/契約 PDF（可複選）", type=["pdf"], accept_multiple_files=True)
 
     # 預先審查表 PDF（可略過）
-    pre_files = st.file_uploader("📥 上傳『執行單位預先審查表』PDF（可複選/可略過）", 
+    pre_files = st.file_uploader("二、📥 上傳『執行單位預先審查表』PDF（可複選/可略過）", 
                                  type=["pdf"], accept_multiple_files=True)
 
-    project_name = st.text_input("案件/專案名稱（將用於檔名）", value="未命名案件")
+    project_name = st.text_input("三、案件/專案名稱（將用於檔名）", value="未命名案件")
     mode = st.radio(
         "檢核模式",
-        ("一次性審查", "批次審查", "逐題審查"),
+        ("一次性審查"),
         horizontal=True,
     )
 
