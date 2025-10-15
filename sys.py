@@ -787,7 +787,7 @@ def main():
             st.info("📋 建立預審與系統檢核的差異對照表…")
             cmp_df = build_compare_table(sys_df=df, pre_df=pre_df)
             st.subheader("🧾 差異對照表（預審 vs. 系統檢核）")
-            show_only_diff = st.checkbox("只顯示『不一致/缺漏』", value=True)
+            
             view_df = cmp_df[cmp_df["差異判定"] != "一致"] if show_only_diff else cmp_df
             
             # 只保留指定欄位
@@ -811,8 +811,7 @@ def main():
                         "預審判定", options=["符合", "不適用", ""], required=False)})
             # 匯出 CSV
             csv = view_df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("📥 下載差異對照表 CSV", data=csv, file_name="compare_table.csv", mime="text/csv")
-
+            
 
            # render_wrapped_table(view_df, height_vh=40)
 
