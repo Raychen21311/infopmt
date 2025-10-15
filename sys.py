@@ -600,9 +600,9 @@ def main():
                     st.warning(f"⚠️ 預審表解析失敗：{e}，請稍後重試或改上傳另一份 PDF。")
 
             if not pre_df.empty:
-                st.subheader("🔎 預審辨識表（請先檢視是否正確）")
+              #  st.subheader("🔎 預審辨識表（請先檢視是否正確）")
                 pre_display_cols = ["編號", "檢核項目", "預審判定", "對應頁次/備註"]
-                render_wrapped_table(pre_df[pre_display_cols], height_vh=40)
+               # render_wrapped_table(pre_df[pre_display_cols], height_vh=40)
             else:
                 st.info("ℹ️ 未上傳或未成功辨識任何預審表內容。")
 
@@ -688,7 +688,7 @@ def main():
         set_progress(92, "📦 彙整與轉表格…")
         df = to_dataframe(all_results)
         st.success("✅ 審查完成")
-        render_wrapped_table(df, height_vh=52)
+     #   render_wrapped_table(df, height_vh=52)
 
         # 5) 差異對照（若有預審）
         cmp_df = pd.DataFrame()
