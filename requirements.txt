@@ -13,4 +13,3 @@ sentence-transformers
 openpyxl
 streamlit-aggrid
 
-defaultdict
