@@ -255,7 +255,7 @@ def search_keywords_windows(page_index: dict, item_id: str, window: int = 2, top
             if snippet:
                 parts.append(f"\n\n===== 【{filename}｜關鍵字命中中心頁 {center}】 =====\n{snippet}")
     return "\n".join(parts).strip()
-``
+
 
 # ========= 建構批次精簡語料 =========
 def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFrame, page_window: int = 2) -> str:
