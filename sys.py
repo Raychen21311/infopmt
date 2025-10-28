@@ -15,7 +15,7 @@ sys.py — RFP/契約 審查（資訊處檢核版） + 預先審查表（PDF 專
 - 編號標準化（compute_std_id）：中文章節→代碼（A..F）+ 數字（含小數）；「其他重點」→ F
 - 檢核清單包含 F 類；批次審查分組為：AB｜CDEF
 """
-
+from collections import defaultdict
 import os, re, json, io
 from typing import List, Dict, Any, Tuple
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
@@ -142,6 +142,183 @@ def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
             text = "\n\n".join([b[4].strip() for b in blocks if b[4].strip()])
         parts.append(f"\n\n===== 【檔案: {filename} 頁: {i}】 =====\n" + text)
     return "\n".join(parts)
+
+def build_page_index(corpus_text: str):
+    """
+    將 extract_text_with_headers() 輸出的合併文本切回「(filename, page) -> text」索引。
+    依據分隔標記：===== 【檔案: {filename} 頁: {i}】 =====
+    """
+    idx = defaultdict(dict)  # idx[filename][page] = text
+    current_file, current_page, buf = None, None, []
+    for line in corpus_text.splitlines():
+        m = re.match(r"^===== 【檔案:\s*(.+?)\s* 頁:\s*(\d+)】 =====\s*$", line.strip())
+        if m:
+            # 收前一頁
+            if current_file and current_page is not None:
+                idx[current_file][int(current_page)] = "\n".join(buf).strip()
+            # 新頁
+            current_file, current_page = m.group(1), int(m.group(2))
+            buf = []
+        else:
+            buf.append(line)
+    # 收最後一頁
+    if current_file and current_page is not None:
+        idx[current_file][int(current_page)] = "\n".join(buf).strip()
+    return idx  # dict[str, dict[int, str]]
+
+def clamp(n, lo, hi):
+    return max(lo, min(n, hi))
+
+def concat_pages(idx_for_file: dict, center_page: int, window: int = 2) -> str:
+    """從某檔案以 center_page 為中心，取 ±window 頁並串接。"""
+    if not idx_for_file:
+        return ""
+    pages = sorted(idx_for_file.keys())
+    if not pages:
+        return ""
+    min_p, max_p = pages[0], pages[-1]
+    s = clamp(center_page - window, min_p, max_p)
+    e = clamp(center_page + window, min_p, max_p)
+    parts = []
+    for p in range(s, e + 1):
+        if p in idx_for_file and idx_for_file[p].strip():
+            parts.append(f"\n\n===== 【抽段: 頁 {p}】 =====\n" + idx_for_file[p])
+    return "\n".join(parts).strip()
+# ========= 解析「對應頁次/備註」中的頁碼 =========
+def parse_pages_from_note(note: str) -> list:
+    """
+    支援常見寫法：
+      P.12、p12、12、12-15、12~15、12、15、18
+    回傳頁碼 list[int]；若無法辨識則回傳空陣列
+    """
+    if not note:
+        return []
+    t = note
+    # 去除常見前綴/符號
+    t = t.replace("P.", " ").replace("p.", " ").replace("P", " ").replace("p", " ")
+    t = re.sub(r"[頁Pp\.：:]", " ", t)
+    cand = []
+    # 範圍 12-15 或 12~15
+    for m in re.finditer(r"(\d+)\s*[-~]\s*(\d+)", t):
+        a, b = int(m.group(1)), int(m.group(2))
+        if a <= b:
+            cand.extend(list(range(a, b + 1)))
+    # 零散頁碼
+    for m in re.finditer(r"\b(\d{1,4})\b", t):
+        cand.append(int(m.group(1)))
+    # 去重排序
+    cand = sorted(set(cand))
+    return cand
+    # ========= 條目ID -> 關鍵字（可持續調整）=========
+ITEM_KEYWORDS = {
+    "A1":  ["延續性", "前案", "採購簽陳"],
+    "B1.1": ["架構圖", "網路架構", "機房", "放置區域"],
+    "B1.2": ["網路介接", "開發工具", "廠牌", "型號", "版本"],
+    "B2": ["對外連線", "連線對象", "線路", "規格清單"],
+    "C1.2": ["資通系統防護基準", "SSDLC", "自評表", "分級辦法"],
+    "C4":   ["不得採用", "大陸廠牌", "資通訊產品"],
+    "D15":  ["虛擬化技術", "帳號清查", "登入", "登出", "異常紀錄", "資料異動", "政府資料標準平臺"],
+    "D16":  ["GIS", "OPENDATA", "MYDATA", "TGOS", "EPSG", "GeoJSON"],
+    "E4":   ["再生測試", "開發工具", "驗證其正確性"],
+    "F2":   ["維運費用", "逐年遞減", "保固", "經費預估"],
+    # ... 其餘條目可逐步補齊
+}
+
+# ========= 關鍵字搜尋 + 頁窗抽段 =========
+def search_keywords_windows(page_index: dict, item_id: str, window: int = 2, top_hits_per_file: int = 2) -> str:
+    """
+    在每個檔案內搜尋 ITEM_KEYWORDS[item_id]，命中頁作為中心取 ±window。
+    每檔最多 top_hits_per_file 個命中群，最後將片段串接。
+    """
+    keywords = ITEM_KEYWORDS.get(item_id, [])
+    if not keywords:
+        return ""
+    parts = []
+    for filename, pages_map in page_index.items():
+        hits = []
+        for p, text in pages_map.items():
+            t = text or ""
+            # 大小寫不敏感比較（針對英文關鍵字）
+            tlow = t.lower()
+            if any((kw.lower() in tlow) or (kw in t) for kw in keywords):
+                hits.append(p)
+        hits = sorted(set(hits))
+        # 合併相近命中（避免重複片段）
+        picked = []
+        for h in hits:
+            if not picked or all(abs(h - c) > window for c in picked):
+                picked.append(h)
+            if len(picked) >= top_hits_per_file:
+                break
+        for center in picked:
+            snippet = concat_pages(pages_map, center_page=center, window=window)
+            if snippet:
+                parts.append(f"\n\n===== 【{filename}｜關鍵字命中中心頁 {center}】 =====\n{snippet}")
+    return "\n".join(parts).strip()
+``
+
+# ========= 建構批次精簡語料 =========
+def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFrame, page_window: int = 2) -> str:
+    """
+    產出一組適合餵給 make_batch_prompt() 的精簡語料。
+    優先：預審「對應頁次/備註」的頁窗；不足則：關鍵字搜尋補段。
+    最終將各條目的抽段以明確分隔線組合。
+    """
+    page_index = build_page_index(corpus_text)
+
+    # 建立 pre_df 的「編號->對應頁次/備註」索引
+    note_map = {}
+    if pre_df is not None and not pre_df.empty:
+        for _, row in pre_df.iterrows():
+            sid = str(row.get("編號", "")).strip()
+            note = str(row.get("對應頁次/備註", "")).strip()
+            if sid:
+                note_map[sid] = note
+
+    batch_parts = []
+    for it in items:
+        iid = it["id"]
+        title = it["item"]
+        # 1) 先從「對應頁次/備註」抽
+        pages_text = ""
+        note = note_map.get(iid, "")
+        page_nums = parse_pages_from_note(note)
+        if page_nums:
+            per_item_parts = []
+            for filename, pmap in page_index.items():
+                for p in page_nums:
+                    seg = concat_pages(pmap, center_page=p, window=page_window)
+                    if seg:
+                        per_item_parts.append(f"\n\n===== 【{filename}｜頁窗中心 {p}】 =====\n{seg}")
+            pages_text = "\n".join(per_item_parts).strip()
+
+        # 2) 不足再用關鍵字搜尋補
+        if not pages_text or len(pages_text) < 300:
+            kw_text = search_keywords_windows(page_index, item_id=iid, window=page_window, top_hits_per_file=2)
+        else:
+            kw_text = ""
+
+        if (pages_text or kw_text):
+            assembled = (pages_text + ("\n\n" + kw_text if kw_text else "")).strip()
+        else:
+            # 保底：無上下文時提示模型照規則判斷
+            assembled = f"(本條目 {iid} 無明確頁次/關鍵字命中，請依『未提及/不適用』原則判斷並簡述依據。)"
+
+        # 封裝每條目的上下文，方便模型對應
+        block = (
+            f"\n\n==============================\n"
+            f"【條目】{iid}｜{title}\n"
+            f"【預審對應頁次/備註】{note or '（無）'}\n"
+            f"【相關抽段（±{page_window} 頁 + 關鍵字）】\n"
+            f"{assembled}\n"
+        )
+        batch_parts.append(block)
+
+    mini_corpus_text = "\n".join(batch_parts).strip()
+    return mini_corpus_text
+
+
+
 
 # ==================== LLM Prompts ====================
 
@@ -701,12 +878,16 @@ def main():
             total_batches = len(groups)
             for bi, (code, items) in enumerate(groups):
                 set_progress(35 + int((bi/max(1,total_batches))*55), f"🔎 第 {bi+1}/{total_batches} 批（{code}）… 共 {len(items)} 項")
-                prompt = make_batch_prompt(code, items, corpus_text)
+      
+                mini_corpus = build_mini_corpus_for_batch(items, corpus_text, pre_df, page_window=2)
+                prompt = make_batch_prompt(code, items, mini_corpus)
                 try:
                     resp = model.generate_content(prompt)
                     arr = parse_json_array(resp.text)
                 except Exception:
                     arr = []
+
+
                 allowed_ids = {it['id'] for it in items}
                 id_to_meta = {it['id']: it for it in items}
                 normalized = []
