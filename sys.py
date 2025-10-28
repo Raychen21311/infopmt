@@ -150,8 +150,10 @@ def build_page_index(corpus_text: str):
     """
     idx = defaultdict(dict)  # idx[filename][page] = text
     current_file, current_page, buf = None, None, []
+    header_pat = re.compile(r"^===== 【檔案:\s*(.+?)\s* 頁:\s*(\d+)】 =====\s*$")
+
     for line in corpus_text.splitlines():
-        m = re.match(r"^===== 【檔案:\s*(.+?)\s* 頁:\s*(\d+)】 =====\s*$", line.strip())
+        m = header_pat.match(line.strip())
         if m:
             # 收前一頁
             if current_file and current_page is not None:
@@ -165,6 +167,7 @@ def build_page_index(corpus_text: str):
     if current_file and current_page is not None:
         idx[current_file][int(current_page)] = "\n".join(buf).strip()
     return idx  # dict[str, dict[int, str]]
+
 
 def clamp(n, lo, hi):
     return max(lo, min(n, hi))
@@ -197,15 +200,18 @@ def parse_pages_from_note(note: str) -> list:
     # 去除常見前綴/符號
     t = t.replace("P.", " ").replace("p.", " ").replace("P", " ").replace("p", " ")
     t = re.sub(r"[頁Pp\.：:]", " ", t)
+
     cand = []
     # 範圍 12-15 或 12~15
     for m in re.finditer(r"(\d+)\s*[-~]\s*(\d+)", t):
         a, b = int(m.group(1)), int(m.group(2))
         if a <= b:
-            cand.extend(list(range(a, b + 1)))
+            cand.extend(range(a, b + 1))
+
     # 零散頁碼
     for m in re.finditer(r"\b(\d{1,4})\b", t):
         cand.append(int(m.group(1)))
+
     # 去重排序
     cand = sorted(set(cand))
     return cand
@@ -316,14 +322,9 @@ def search_keywords_windows(page_index: dict, item_id: str, window: int = 2, top
 
 # ========= 建構批次精簡語料 =========
 def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFrame, page_window: int = 2) -> str:
-    """
-    產出一組適合餵給 make_batch_prompt() 的精簡語料。
-    優先：預審「對應頁次/備註」的頁窗；不足則：關鍵字搜尋補段。
-    最終將各條目的抽段以明確分隔線組合。
-    """
     page_index = build_page_index(corpus_text)
 
-    # 建立 pre_df 的「編號->對應頁次/備註」索引
+    # 建立「編號 -> 對應頁次/備註」索引
     note_map = {}
     if pre_df is not None and not pre_df.empty:
         for _, row in pre_df.iterrows():
@@ -336,14 +337,17 @@ def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFr
     for it in items:
         iid = it["id"]
         title = it["item"]
+
         # 1) 先從「對應頁次/備註」抽
-        pages_text = ""
-        note = note_map.get(iid, "")
+        pages_text, note = "", note_map.get(iid, "")
         page_nums = parse_pages_from_note(note)
         if page_nums:
             per_item_parts = []
             for filename, pmap in page_index.items():
                 for p in page_nums:
+                    # 只在該檔案確實存在此頁時才抽段，避免被 clamp 成端點頁
+                    if p not in pmap:
+                        continue
                     seg = concat_pages(pmap, center_page=p, window=page_window)
                     if seg:
                         per_item_parts.append(f"\n\n===== 【{filename}｜頁窗中心 {p}】 =====\n{seg}")
@@ -361,7 +365,6 @@ def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFr
             # 保底：無上下文時提示模型照規則判斷
             assembled = f"(本條目 {iid} 無明確頁次/關鍵字命中，請依『未提及/不適用』原則判斷並簡述依據。)"
 
-        # 封裝每條目的上下文，方便模型對應
         block = (
             f"\n\n==============================\n"
             f"【條目】{iid}｜{title}\n"
