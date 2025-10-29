@@ -1,4 +1,3 @@
-DEBUG = True  # True 時會印出詳細調試資訊；要關掉就設 False
 # -*- coding: utf-8 -*-
 """
 sys.py — RFP/契約 審查（資訊處檢核版） + 預先審查表（PDF 專用）
@@ -151,10 +150,8 @@ def build_page_index(corpus_text: str):
     """
     idx = defaultdict(dict)  # idx[filename][page] = text
     current_file, current_page, buf = None, None, []
-    header_pat = re.compile(r"^===== 【檔案:\s*(.+?)\s* 頁:\s*(\d+)】 =====\s*$")
-
     for line in corpus_text.splitlines():
-        m = header_pat.match(line.strip())
+        m = re.match(r"^===== 【檔案:\s*(.+?)\s* 頁:\s*(\d+)】 =====\s*$", line.strip())
         if m:
             # 收前一頁
             if current_file and current_page is not None:
@@ -167,21 +164,7 @@ def build_page_index(corpus_text: str):
     # 收最後一頁
     if current_file and current_page is not None:
         idx[current_file][int(current_page)] = "\n".join(buf).strip()
-
-    if DEBUG:
-        total_pages = sum(len(pmap) for pmap in idx.values())
-        print(f"[DEBUG] build_page_index: files={len(idx)}, total_pages={total_pages}")
-        for i, (fname, pmap) in enumerate(idx.items()):
-            if i >= 3: break  # 只示範前 3 檔
-            pages = sorted(pmap.keys())
-            print(f"  - {fname}: pages={pages[:10]}{'...' if len(pages)>10 else ''}")
-            # 印出第一頁的前 150 字
-            if pages:
-                sample = (pmap[pages[0]] or "")[:150].replace("\n", " ")
-                print(f"    sample p.{pages[0]}: {sample}")
-
     return idx  # dict[str, dict[int, str]]
-
 
 def clamp(n, lo, hi):
     return max(lo, min(n, hi))
@@ -209,25 +192,23 @@ def parse_pages_from_note(note: str) -> list:
     回傳頁碼 list[int]；若無法辨識則回傳空陣列
     """
     if not note:
-        if DEBUG:
-            print(f"[DEBUG] parse_pages_from_note: note is empty")
         return []
     t = note
+    # 去除常見前綴/符號
     t = t.replace("P.", " ").replace("p.", " ").replace("P", " ").replace("p", " ")
     t = re.sub(r"[頁Pp\.：:]", " ", t)
-
     cand = []
+    # 範圍 12-15 或 12~15
     for m in re.finditer(r"(\d+)\s*[-~]\s*(\d+)", t):
         a, b = int(m.group(1)), int(m.group(2))
         if a <= b:
-            cand.extend(range(a, b + 1))
+            cand.extend(list(range(a, b + 1)))
+    # 零散頁碼
     for m in re.finditer(r"\b(\d{1,4})\b", t):
         cand.append(int(m.group(1)))
-
-    pages = sorted(set(cand))
-    if DEBUG:
-        print(f"[DEBUG] parse_pages_from_note: raw='{note}' -> pages={pages}")
-    return pages
+    # 去重排序
+    cand = sorted(set(cand))
+    return cand
     # ========= 條目ID -> 關鍵字（可持續調整）=========
 ITEM_KEYWORDS = {
     # A 基本與前案
@@ -302,45 +283,47 @@ ITEM_KEYWORDS = {
 
 # ========= 關鍵字搜尋 + 頁窗抽段 =========
 def search_keywords_windows(page_index: dict, item_id: str, window: int = 2, top_hits_per_file: int = 2) -> str:
+    """
+    在每個檔案內搜尋 ITEM_KEYWORDS[item_id]，命中頁作為中心取 ±window。
+    每檔最多 top_hits_per_file 個命中群，最後將片段串接。
+    """
     keywords = ITEM_KEYWORDS.get(item_id, [])
-    if DEBUG:
-        print(f"[DEBUG] search_keywords_windows: item_id={item_id}, keywords={keywords}")
     if not keywords:
         return ""
-
     parts = []
-    total_hits = 0
     for filename, pages_map in page_index.items():
         hits = []
         for p, text in pages_map.items():
             t = text or ""
+            # 大小寫不敏感比較（針對英文關鍵字）
             tlow = t.lower()
             if any((kw.lower() in tlow) or (kw in t) for kw in keywords):
                 hits.append(p)
         hits = sorted(set(hits))
+        # 合併相近命中（避免重複片段）
         picked = []
         for h in hits:
             if not picked or all(abs(h - c) > window for c in picked):
                 picked.append(h)
             if len(picked) >= top_hits_per_file:
                 break
-        total_hits += len(picked)
-        if DEBUG and picked:
-            print(f"  [DEBUG] keyword hits in {filename}: {picked}")
-
         for center in picked:
             snippet = concat_pages(pages_map, center_page=center, window=window)
             if snippet:
                 parts.append(f"\n\n===== 【{filename}｜關鍵字命中中心頁 {center}】 =====\n{snippet}")
-
-    if DEBUG:
-        print(f"[DEBUG] search_keywords_windows: total_hits={total_hits}, parts_len={len(parts)}")
     return "\n".join(parts).strip()
+
 
 # ========= 建構批次精簡語料 =========
 def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFrame, page_window: int = 2) -> str:
+    """
+    產出一組適合餵給 make_batch_prompt() 的精簡語料。
+    優先：預審「對應頁次/備註」的頁窗；不足則：關鍵字搜尋補段。
+    最終將各條目的抽段以明確分隔線組合。
+    """
     page_index = build_page_index(corpus_text)
 
+    # 建立 pre_df 的「編號->對應頁次/備註」索引
     note_map = {}
     if pre_df is not None and not pre_df.empty:
         for _, row in pre_df.iterrows():
@@ -353,20 +336,20 @@ def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFr
     for it in items:
         iid = it["id"]
         title = it["item"]
-
-        pages_text, note = "", note_map.get(iid, "")
+        # 1) 先從「對應頁次/備註」抽
+        pages_text = ""
+        note = note_map.get(iid, "")
         page_nums = parse_pages_from_note(note)
         if page_nums:
             per_item_parts = []
             for filename, pmap in page_index.items():
                 for p in page_nums:
-                    if p not in pmap:  # 只抽存在頁
-                        continue
                     seg = concat_pages(pmap, center_page=p, window=page_window)
                     if seg:
                         per_item_parts.append(f"\n\n===== 【{filename}｜頁窗中心 {p}】 =====\n{seg}")
             pages_text = "\n".join(per_item_parts).strip()
 
+        # 2) 不足再用關鍵字搜尋補
         if not pages_text or len(pages_text) < 300:
             kw_text = search_keywords_windows(page_index, item_id=iid, window=page_window, top_hits_per_file=2)
         else:
@@ -375,8 +358,10 @@ def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFr
         if (pages_text or kw_text):
             assembled = (pages_text + ("\n\n" + kw_text if kw_text else "")).strip()
         else:
+            # 保底：無上下文時提示模型照規則判斷
             assembled = f"(本條目 {iid} 無明確頁次/關鍵字命中，請依『未提及/不適用』原則判斷並簡述依據。)"
 
+        # 封裝每條目的上下文，方便模型對應
         block = (
             f"\n\n==============================\n"
             f"【條目】{iid}｜{title}\n"
@@ -386,15 +371,7 @@ def build_mini_corpus_for_batch(items: list, corpus_text: str, pre_df: pd.DataFr
         )
         batch_parts.append(block)
 
-        if DEBUG:
-            print(f"[DEBUG] build_mini_corpus_for_batch: item={iid}, pages_text_len={len(pages_text)}, kw_text_len={len(kw_text)}")
-
     mini_corpus_text = "\n".join(batch_parts).strip()
-    if DEBUG:
-        print(f"[DEBUG] build_mini_corpus_for_batch: mini_corpus_total_len={len(mini_corpus_text)} (for {len(items)} items)")
-        # 印出前 800 字供快速確認
-        preview = mini_corpus_text[:800].replace("\n", " ")
-        print(f"  preview: {preview}")
     return mini_corpus_text
 
 
@@ -960,16 +937,7 @@ def main():
                 set_progress(35 + int((bi/max(1,total_batches))*55), f"🔎 第 {bi+1}/{total_batches} 批（{code}）… 共 {len(items)} 項")
       
                 mini_corpus = build_mini_corpus_for_batch(items, corpus_text, pre_df, page_window=2)
-                if DEBUG:
-                    print(f"[DEBUG] main: batch={code}, mini_corpus_len={len(mini_corpus)}")
                 prompt = make_batch_prompt(code, items, mini_corpus)
-                if DEBUG:
-                    print(f"[DEBUG] main: prompt_len={len(prompt)}; checklist_items={len(items)}")
-                    # 顯示 prompt 內是否包含關鍵標記
-                    print(f"[DEBUG] main: prompt contains '頁窗中心'? {'頁窗中心' in prompt}")
-                    print(f"[DEBUG] main: prompt contains '關鍵字命中中心頁'? {'關鍵字命中中心頁' in prompt}")
-
-
                 try:
                     resp = model.generate_content(prompt)
                     arr = parse_json_array(resp.text)
