@@ -808,7 +808,7 @@ def main():
                 disabled=["類別", "編號", "檢核項目（系統基準）", "系統檢核結果"],  # 禁止編輯這些欄位
                 column_config={
                     "預審判定（原字）": st.column_config.SelectboxColumn(
-                        "預審判定", options=["符合", "不適用", ""], required=False)})
+                        "預審判定", options=["符合", "不適用","","未提及"], required=False)})
             # 匯出 CSV
             csv = view_df.to_csv(index=False).encode("utf-8-sig")
             
