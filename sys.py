@@ -221,8 +221,7 @@ JSON。輸入及輸出之資料內容並須符合國發會「政府資料品質�
     "category": "A 基本與前案",
     "item": "條目原文（請完整複製）",
     "compliance": "若 id = 'A0'：僅能輸出六選一【開發建置｜系統維運｜功能增修｜套裝軟體｜硬體｜其他】；若 id ≠ 'A0'：僅能輸出四選一【符合｜部分符合｜未提及｜不適用】；禁止同時輸出多個或其他文字",
-    "evidence": [{{"file": "檔名", "page": 頁碼, "quote": "逐字引述"}}],
-    "recommendation": "若未提及/部分符合，請給具體補強方向；否則留空"
+    "recommendation": "請給具體建議，盡量附上頁碼"
   }}
 ]
 【本批檢核清單（id｜item）】
@@ -242,7 +241,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 
 【顯示用必填 5 欄】
 - "id": 先填你能辨識的粗編號（如「案件性質-1.」「現況說明-1.(2)」「A2.3」等；若無可留空）
-- "item": 檢核項目（擷取要點，不要省略）
+- "item": 檢核項目（完整擷取，不要省略）
 - "status": 僅能輸出二選一【符合｜不適用】；若該列未勾選任何選項，請輸出空字串 ""
 - "biz_ref_note": 對應頁次或補充說明
 
@@ -251,7 +250,6 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 - "main_no": 主號（如 1, 2, 3）
 - "sub_no": 次號（如 1, 2；若無可省略）
 - "std_id": 若能依下方規則直接計算出系統標準 ID（A..F + 數字[.數字]），請填；否則空字串
-- "evidence": 每列至少一筆：{{"file": 檔名, "page": 頁碼, "quote": 引述短句}}
 
 【重要版面規則（請嚴格遵循）】
 1) 本表「表頭」通常為：「檢核內容｜符合｜不適用｜對應頁次/備註」。
@@ -262,7 +260,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
    - 將每個子項拆成獨立列（例如「A2.1」「A2.2」「A2.3」…），並依該子項在矩陣同序位格子的「■/□」決定 "status"。
    - 例如：若四個子項後面出現第一列：`□ □ □ □`、第二列：`■ ■ ■ ■`，則四個子項均為 **"不適用"**。
 4) 若無矩陣、而是每列文字右側各自出現「符合/不適用」勾選，請就近判斷該列的 "status"。
-5) **不得猜測**：若確實沒有任何「符合/不適用」的勾選跡象，"status" 請回空字串 ""，並提供 evidence。
+5) **不得猜測**：若確實沒有任何「符合/不適用」的勾選跡象，"status" 請回空字串 ""，並提供 recommendation。
 
 【A0 特例（六選一）】
 - 若檢出「案件性質」類型勾選（開發建置/系統維運/功能增修/套裝軟體/硬體/其他），請額外新增一列 A0：
@@ -270,8 +268,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "id": "A0", "item": "案件性質（六選一）",
     "status": "（填被勾選的類型字樣）",   # A0 為字面值，非「符合/不適用」
     "biz_ref_note": "",
-    "section_title": "案件性質", "main_no": 0, "std_id": "A0",
-    "evidence": [{{"file":"...", "page": 頁碼, "quote":"..."}}]
+    "section_title": "案件性質", "main_no": 0, "std_id": "A0"
   }}
 
 【安全規範】
@@ -288,8 +285,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
     "section_title": "現況說明",
     "main_no": 1,
     "sub_no": 2,
-    "std_id": "B1.2",
-    "evidence": [{{"file":"xxx.pdf","page":2,"quote":"…"}}]
+    "std_id": "B1.2"
   }}
 ]
 
@@ -434,7 +430,7 @@ def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
             "main_no": r.get("main_no", None),
             "sub_no": r.get("sub_no", None),
             "std_id": r.get("std_id","").strip(),             # 若模型已算出
-            "evidence": ev,                                    # 保留但不顯示
+
         })
     return rows
 
@@ -466,13 +462,11 @@ def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
 def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
     rows = []
     for r in results:
-        ev_text = "\n".join([f"{e.get('file','')} p.{e.get('page','')}：{e.get('quote','')}" for e in r.get('evidence', [])])
-        rows.append({
+       rows.append({
             "類別": r.get("category",""),
             "編號": r.get("id",""),
             "檢核項目": r.get("item",""),
             "符合情形": r.get("compliance",""),
-            "主要證據": ev_text,
             "改善建議": r.get("recommendation",""),
         })
     df = pd.DataFrame(rows)
@@ -722,7 +716,6 @@ def main():
                         'category': d.get('category', meta['category']),
                         'item': d.get('item', meta['item']),
                         'compliance': d.get('compliance', ''),
-                        'evidence': d.get('evidence', []),
                         'recommendation': d.get('recommendation', ''),
                     })
                 returned_ids = {x['id'] for x in normalized}
@@ -730,7 +723,7 @@ def main():
                     if it['id'] not in returned_ids:
                         normalized.append({
                             'id': it['id'], 'category': it['category'], 'item': it['item'],
-                            'compliance': '未提及', 'evidence': [], 'recommendation': ''
+                            'compliance': '未提及', 'recommendation': ''
                         })
                 all_results.extend(normalized)
         else:
@@ -753,13 +746,12 @@ def main():
                 if picked is None:
                     picked = {
                         'id': it['id'], 'category': it['category'], 'item': it['item'],
-                        'compliance': '未提及', 'evidence': [], 'recommendation': ''
+                        'compliance': '未提及', 'recommendation': ''
                     }
                 else:
                     picked.setdefault('category', it['category'])
                     picked.setdefault('item', it['item'])
                     picked.setdefault('compliance', '')
-                    picked.setdefault('evidence', [])
                     picked.setdefault('recommendation', '')
                 all_results.append(picked)
 
