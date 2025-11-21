@@ -148,7 +148,7 @@ def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
 def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text: str) -> str:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
 
-    batch_prompt = """
+    batch_code = """
 你是政府機關資訊處之採購/RFP/契約審查委員。請依下列「檢核條目（{batch_code} 批）」逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
 【審查原則】
 1) 僅依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
