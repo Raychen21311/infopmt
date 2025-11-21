@@ -43,8 +43,8 @@ def is_pdf(name: str) -> bool:
     return name.lower().endswith(".pdf")
 
 # ==================== 檢核清單（含 F 其他重點） ====================
-def build_rfp_checklist() -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
+def build_rfp_checklist() -> list[dict[str, any]]:
+    items: list[dict[str, any]] = []
     def add(cat, code, text): items.append({"category":cat, "id":code, "item":text})
 
     # A 基本與前案
