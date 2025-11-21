@@ -155,10 +155,11 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
 
     batch_prompt = """
-你是政府機關資訊處之採購/RFP/契約審查委員。請依「本批檢核清單(checklist_lines)逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
+你是政府機關資訊處之採購/RFP/契約審查委員。請依「檢核項目(checklist_lines)逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目，
+並給予***差異說明/建議***：
 【審查原則】
 **************審查時，條目原文（請完整複製）需與預審表檢核內容完全一致***********
-1) 僅依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
+1) 須依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
 2) 若屬不適用（例：未允許分包），請回「不適用」並說明依據。
 3) 務必引用原文短句與檔名/頁碼作為 evidence。
 4) ***嚴禁輸出任何與規格聯絡人、電話、姓名、聯繫方式有關的文字，即使原始文件內有。***
@@ -183,7 +184,7 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
     return batch_prompt
 
 def make_single_prompt(item: Dict[str, Any], corpus_text: str) -> str:
-    return make_batch_prompt(item['id'], [item], corpus_text)
+    return (item['id'], [item], corpus_text)
 
 # （預審表抽取：預審判定僅允許【符合/不適用】，未勾選輸出空字串；A0 例外為六選一字面）
 def make_precheck_parse_prompt(corpus_text: str) -> str:
