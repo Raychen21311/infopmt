@@ -157,6 +157,7 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
     batch_prompt = """
 你是政府機關資訊處之採購/RFP/契約審查委員。請依下列「檢核條目（{batch_code} 批）」逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
 【審查原則】
+**************審查時，條目原文（請完整複製）需與預審表檢核內容完全一致***********
 1) 僅依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
 2) 若屬不適用（例：未允許分包），請回「不適用」並說明依據。
 3) 務必引用原文短句與檔名/頁碼作為 evidence。
@@ -645,7 +646,7 @@ def main():
     )
 
     if st.button("🚀 開始審查", disabled=not uploaded_files):
-        st.info(m.name)
+      
         
         checklist_all = build_rfp_checklist()
 
