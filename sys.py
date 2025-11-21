@@ -513,7 +513,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
     pre_df 來自預審辨識：      欄位 [編號, 檢核項目, 預審判定, 對應頁次/備註, _預審等價級_隱藏]
     """
     # 關鍵修正：不要用 set_index("編號").to_dict(...) 以免列 dict 失去「編號」欄
-    sys_idx: Dict[str, Dict[str, Any]] = {}
+    sys_idx: dict[str, dict[str, any]] = {}
     for _, row in sys_df.iterrows():
         rid = str(row.get("編號", "")).strip()
         if rid:
