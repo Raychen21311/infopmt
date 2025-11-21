@@ -714,6 +714,7 @@ def main():
                 set_progress(35 + int((bi/max(1,total_batches))*55), f"🔎 第 {bi+1}/{total_batches} 批（{code}）… 共 {len(items)} 項")
                 
                 prompt = make_batch_prompt(code, items, corpus_text)
+                st.info(items)
                 st.info(prompt)
                 try:
                     resp = model.generate_content(prompt)
