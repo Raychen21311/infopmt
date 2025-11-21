@@ -645,6 +645,7 @@ def main():
     )
 
     if st.button("🚀 開始審查", disabled=not uploaded_files):
+        st.info(m.name)
         
         checklist_all = build_rfp_checklist()
 
