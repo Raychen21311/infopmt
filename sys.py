@@ -297,19 +297,19 @@ def _format_evidence_list(e_list: List[Dict[str, Any]]) -> str:
 
 def normalize_status_equiv(s: str) -> str:
     """
-    預審端僅兩態（符合/不適用），其餘/空白一律視為「未提及」以利與系統四態比對。
+    預審端僅兩態（符合/不適用）
     """
     if s is None:
-        return "未提及"
+        return "空白"
     t = re.sub(r"\s+", "", str(s)).lower()
     if t == "":
-        return "未提及"
+        return "空白"
     if t in ("符合", "ok", "pass", "通過"):
         return "符合"
     if t in ("不適用", "na", "n/a"):
         return "不適用"
     # 任何其它字眼（如不符合/需補件/改善等）一律視為「未提及」（因預審正式只用兩態）
-    return "未提及"
+    return "?"
 
 # 章節 → 代號（含 F）
 SECTION_TO_LETTER = {
@@ -645,50 +645,7 @@ def main():
         st.info(f"🧪 執行系統檢核模式：{mode}")
         if mode.startswith("一"):
             groups = group_items_by_ABCDE(checklist_all); st.info("一次性審查中")
-        elif mode.startswith("批"):
-            groups = group_items_by_AB_CDE(checklist_all); st.info("批次審查中（AB｜CDEF）")
-        else:
-            groups = None  # 逐題
 
-        if groups is not None:
-            total_batches = len(groups)
-            for bi, (code, items) in enumerate(groups):
-                set_progress(35 + int((bi/max(1,total_batches))*55), f"🔎 第 {bi+1}/{total_batches} 批（{code}）… 共 {len(items)} 項")
-                
-                prompt = make_batch_prompt(code, items, corpus_text)
-                st.info(items)
-                st.info(prompt)
-                try:
-                    resp = model.generate_content(prompt)
-                    arr = parse_json_array(resp.text)
-                except Exception:
-                    arr = []
-                allowed_ids = {it['id'] for it in items}
-                id_to_meta = {it['id']: it for it in items}
-                normalized = []
-                for d in arr if isinstance(arr, list) else []:
-                    if not isinstance(d, dict): 
-                        continue
-                    rid = d.get('id')
-                    if rid not in allowed_ids:
-                        continue
-                    meta = id_to_meta[rid]
-                    normalized.append({
-                        'id': rid,
-                        'category': d.get('category', meta['category']),
-                        'item': d.get('item', meta['item']),
-                        'compliance': d.get('compliance', ''),
-                        'evidence': d.get('evidence', []),
-                        'recommendation': d.get('recommendation', ''),
-                    })
-                returned_ids = {x['id'] for x in normalized}
-                for it in items:
-                    if it['id'] not in returned_ids:
-                        normalized.append({
-                            'id': it['id'], 'category': it['category'], 'item': it['item'],
-                            'compliance': '未提及', 'evidence': [], 'recommendation': ''
-                        })
-                all_results.extend(normalized)
         else:
             # 逐題模式
             items_ordered = order_items_AB_C_D_E(checklist_all)
@@ -697,6 +654,7 @@ def main():
             for i, it in enumerate(items_ordered):
                 set_progress(35 + int((i/max(1,total_items))*55), f"🧩 第 {i+1}/{total_items} 題：{it['id']} …")
                 prompt = make_single_prompt(it, corpus_text)
+
                 try:
                     resp = model.generate_content(prompt)
                     arr = parse_json_array(resp.text)
@@ -707,6 +665,7 @@ def main():
                     if isinstance(d, dict) and d.get('id') == it['id']:
                         picked = d; break
                 if picked is None:
+                    st.info(item)
                     picked = {
                         'id': it['id'], 'category': it['category'], 'item': it['item'],
                         'compliance': '未提及', 'evidence': [], 'recommendation': ''
@@ -718,6 +677,7 @@ def main():
                     picked.setdefault('evidence', [])
                     picked.setdefault('recommendation', '')
                 all_results.append(picked)
+                st.info(item)
 
         # 4) 檢核結果 → 表格
         set_progress(92, "📦 彙整與轉表格…")
@@ -765,7 +725,7 @@ def main():
                 disabled=["類別", "編號", "檢核項目（系統基準）", "系統檢核結果"],  # 禁止編輯這些欄位
                 column_config={
                     "預審判定（原字）": st.column_config.SelectboxColumn(
-                        "預審判定", options=["符合", "不適用","","未提及"], required=False)})
+                        "預審判定", options=["符合", "不適用",""], required=False)})
             # 匯出 CSV
             csv = view_df.to_csv(index=False).encode("utf-8-sig")
             
