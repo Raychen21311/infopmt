@@ -712,7 +712,7 @@ def main():
             total_batches = len(groups)
             for bi, (code, items) in enumerate(groups):
                 set_progress(35 + int((bi/max(1,total_batches))*55), f"🔎 第 {bi+1}/{total_batches} 批（{code}）… 共 {len(items)} 項")
-                st.info(prompt)
+                
                 prompt = make_batch_prompt(code, items, corpus_text)
                 
                 try:
@@ -783,6 +783,7 @@ def main():
      #   render_wrapped_table(df, height_vh=52)
 
         reply_prompt = make_reply_prompt(corpus_text)
+        st.info(reply_prompt)
         try:
             reply_resp = model.generate_content(reply_prompt)
             reply_text = reply_resp.text.strip()
