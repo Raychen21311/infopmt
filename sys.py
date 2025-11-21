@@ -32,8 +32,11 @@ if os.getenv('GOOGLE_API_KEY'):
     genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-for model in client.models.list():
-    print(model.name)
+
+for m in genai.list_models():
+    if 'generateContent' in m.supported_generation_methods:
+        print(m.name)
+
 
 # -------------------- 檔案型態 --------------------
 def is_pdf(name: str) -> bool:
