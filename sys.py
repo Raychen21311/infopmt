@@ -155,7 +155,7 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
 
     batch_prompt = """
-你是政府機關資訊處之採購/RFP/契約審查委員。請依下列「檢核條目（{batch_code} 批）」逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
+你是政府機關資訊處之採購/RFP/契約審查委員。請依「本批檢核清單(checklist_lines)逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
 【審查原則】
 **************審查時，條目原文（請完整複製）需與預審表檢核內容完全一致***********
 1) 僅依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
