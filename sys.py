@@ -32,12 +32,6 @@ if os.getenv('GOOGLE_API_KEY'):
     genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-
-for m in genai.list_models():
-    if 'generateContent' in m.supported_generation_methods:
-        print(m.name)
-
-
 # -------------------- 檔案型態 --------------------
 def is_pdf(name: str) -> bool:
     return name.lower().endswith(".pdf")
@@ -120,10 +114,10 @@ def build_rfp_checklist() -> list[dict[str, any]]:
     return items
 
 # ==================== 分群/排序工具（批次改為 AB｜CDEF） ====================
-def group_items_by_ABCDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
+def group_items_by_ABCDE(items: list[dict[str, any]]) -> list[Tuple[str, list[dict[str, any]]]]:
     return [("ABCDE", items)] if items else []
 
-def group_items_by_AB_CDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
+def group_items_by_AB_CDE(items: list[dict[str, any]]) -> list[Tuple[str, list[dict[str, any]]]]:
     """保留函式名以相容，但第二組已擴充為 CDEF。"""
     ab   = [it for it in items if it['id'] and it['id'][0] in ('A','B')]
     cdef = [it for it in items if it['id'] and it['id'][0] in ('C','D','E','F')]
@@ -133,7 +127,7 @@ def group_items_by_AB_CDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[D
     return groups
 
 # 逐題排序（A→B→C→D→E→F）
-def order_items_AB_C_D_E(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def order_items_AB_C_D_E(items: list[dict[str, any]]) -> list[dict[str, any]]:
     order_map = {'A':0,'B':1,'C':2,'D':3,'E':4,'F':5}
     return sorted(items, key=lambda it: (order_map.get(it['id'][0], 9), it['id']))
 
@@ -151,29 +145,95 @@ def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
 
 # ==================== LLM Prompts ====================
 
-def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text: str) -> str:
+def make_batch_prompt(batch_code: str, items: list[dict[str, any]], corpus_text: str) -> str:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
 
     batch_prompt = """
-你是政府機關資訊處之採購/RFP/契約審查委員。請依「檢核項目(checklist_lines)逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目，
-並給予***差異說明/建議***：
+你是政府機關資訊處之採購/RFP/契約審查委員。請依下列「檢核條目（{batch_code} 批）」逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
 【審查原則】
-**************審查時，條目原文（請完整複製）需與預審表檢核內容完全一致***********
-1) 須依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
+1) 僅依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
 2) 若屬不適用（例：未允許分包），請回「不適用」並說明依據。
 3) 務必引用原文短句與檔名/頁碼作為 evidence。
 4) ***嚴禁輸出任何與規格聯絡人、電話、姓名、聯繫方式有關的文字，即使原始文件內有。***
 5) 審查時應參閱預審相關說明，避免未參考預審說明而誤判。
+6) 若 id = 'A1'，請回復"請檢視是否已附前案採購簽陳影本，以確保採購流程的延續性與合法性檢視基礎。"
+7) 若 id = 'A2.1、A2.2、A2.3 或 A2.4'，原則上預審表結果為不適用即為不適用，並回復"與資訊處之相關實務情形，請承辦人再次核實。"
+8) 若 id = 'A2.1、A2.2、A2.3 或 A2.4'，原則上預審表結果為不適用即為不適用，並回復"與資訊處之相關實務情形，請承辦人再次核實。"
+7) 若 id = 'A2.1、A2.2、A2.3 預審表結果為不適用或空白，'A2.4'預審表結果即為符合，並回復"與資訊處之相關實務情形，請承辦人再次核實。"
 
+9) 若 id = 'B1'，符合情形：有包含設備、網路、機房架構圖、有寫硬體放置區域為"衛生福利部外"或"衛生福利部內。
+10) 若 id = 'B2'，符合情形：有包含網路架構圖，一般原則上均無對外連線之網路，架構圖接只畫出對內部線路圖。
+
+12) 若 id = 'C3.1、C3.2'，原則上需求書或契約書無提及"投標廠商有需再分包給其他廠商等相關需求"，即為"不適用"，若有需詳盡說明。
+13) 若 id = 'D4'，如無公開給民眾使用之系統應為不適用、若有提出ODF相關需求亦可為符合，但須說明一下。
+14) 若 id = 'D5、D6'，無App需求內容即為不適用。
+15) 若 id = 'D16'，無 GIS、OpenData、MyData 作業需求，應為不適用。
+16) 若 id = 'D5、D6'，符合兩條件中之一件即可。
+17) 若 id = 'D15'，註5.作業需求必須納入之制式文句：
+*本專案所使用之系統軟體(如作業系統、資料庫軟體等)或瀏覽器軟體版本更新時，於本部通
+知限期內，廠商須對應用系統進行修正。
+*支援系統備援及緊急回復工作，並視本部要求配合執行系統遷移不同伺服主機作業。
+*維持本專案系統與其他相關系統整合介面之正常運作（含介接作業所需之欄位增修）。
+*本專案系統建置過程須適當導入虛擬化技術並預留日後擴充之可能性，以減少各系統重複建
+置資源之成本。
+*提供本專案系統使用者帳號清查紀錄表。
+*提供本專案系統使用者帳號登出、入、異常紀錄查詢列表。
+*本專案系統之資料異動，需記錄異動內容、操作者、時間、IP 等資訊，以供後續追蹤查詢。
+(內含重要資料之系統時請列入)
+*本專案若屬新建置系統於資料庫規格設計時須引用政府資料標準平臺
+(https://schema.gov.tw/)所公布相關領域資料標準之資料欄位命名及格式定義；若屬舊有
+系統並負有OPENDATA、MYDATA 或交換資料的服務時，應逐步將資料庫的相關欄位參照前述相
+關領域資料標準進行格式標準化，以減少資料運用單位的資料清理(ETL)時間，強化系統服務
+的資料即時性。
+18) 若 id = 'D16'，註6.GIS、OPENDATA、MYDATA 作業需求必須納入之制式文句：
+(a)GIS（地理圖資系統）：
+*空間資訊須採用全國通用之坐標系統（TWD97、WGS84 EPSG:3857、WGS84 EPSG:4326）。
+*輸入資料格式須至少為CSV、XLS、XLSX、XML、JSON、GeoJSON、KML、KMZ、或SHP，輸出
+資料格式至少為CSV、GeoJSON、KML、KMZ、或SHP。輸入及輸出之資料內容並須符合國發
+會「政府資料品質提升機制運作指引」之規範。
+*輸出資料須有固定下載連結，或提供符合「國發會共通性應用程式介面規範」之介接方式。
+*建置地圖服務如有使用各式主題圖資、定位查詢、及分析功能之需求，應優先使用內政部
+TGOS 提供之各式服務資源（https://www.tgos.tw）；另使用之底圖，應使用內政部國土測
+繪中心提供之臺灣通用電子地圖各式底圖資源（https://maps.nlsc.gov.tw/）。
+*匯入系統之資料內容如包括地址，則須自動轉為坐標。
+*使用付費網路資源建置系統或圖台，購置授權數量須符合預估用量。
+*使用付費軟體建置GIS 伺服器，購買授權數量須符合預估計算與發佈能量需求。
+(b)OPENDATA（政府資料開放）：
+*資料(庫)欄位設計須引用政府資料標準平臺(https://schema.gov.tw/)所公布相關領域
+資料標準之資料欄位命名及格式定義。
+*輸入資料格式需至少為CSV、XLS、XLSX、XML 或JSON，輸出資料格式至少為CSV、XML 或
+JSON。輸入及輸出之資料內容並須符合國發會「政府資料品質提升機制運作指引」之規範。
+(c)MYDATA（數位服務個人化）：
+*應依據國家發展委員會「數位服務個人化平臺介接作業試辦要點」辦理，提供民眾下載及
+運用其個人化資料，並保障資訊安全及個人隱私權益。
+*具資料提供者角色之系統，須於數位服務個人化(MyData)管理後臺登入填寫資料傳輸項目
+及開發介接程式，經當事人完成身分驗證及同意後，傳輸提供該個人化資料。
+*具資料提供者角色之系統，應參照國家發展委員會範例製作及上傳「數位服務個人化
+(MyData)介接資料檔案規格書」。
+*具服務提供者角色之系統，須於數位服務個人化(MyData)管理後臺登入填寫服務項目，及
+參照已開放之數位服務個人化(MyData)介接資料檔案規格書開發介接程式，經當事人完成
+身分驗證及同意後，取得該當事人個人化資料並處理運用。
+*具服務提供者角色之系統，應於線上服務揭示服務條款，包含服務名稱、服務目的與內容、
+資料集項目、資料儲存與使用方式、當事人相關權利等內容。
+*應產製當事人資料傳輸相關紀錄並保存至少1 年，紀錄內容至少包含傳輸時間、傳輸對象、
+當事人身分、資料傳輸成功與否等。
+*開發數位服務個人化(MyData)平臺介接程式，請參考「數位服務個人化(MyData)應用規範」
+及其技術文件(https://github.com/ehousekeeper/emsg)。。
+19)若 id = 'D17'，如非系統移轉或上線，應為不適用。
+20)若 id = 'D19'，如無導入 AI 技術之相關需求，應為不適用。
+21)若 id = 'E1'，文件有紀錄交付時程即符合，如違建置案須注意開發方式等相關內容。
+22)若 id = 'F7'，文件有紀錄交付時程即符合，如如文件未提及則應為不適用。
+23) 若 id = 'A0'，以預審表判定為主(以業務單位需求為主)，可多選。
+24)請注意***檢核項目需完全與檢核條目一模一樣***。
 【輸出格式 — 僅能輸出 JSON 陣列，無任何多餘文字/標記】
 [
   {{
     "id": "A1",
     "category": "A 基本與前案",
     "item": "條目原文（請完整複製）",
-    "compliance": "若 id = 'A0'：僅能輸出六選一【開發建置｜系統維運｜功能增修｜套裝軟體｜硬體｜其他】；若 id ≠ 'A0'：僅能輸出四選一【符合｜部分符合｜不適用】；禁止同時輸出多個或其他文字",
+    "compliance": "若 id = 'A0'：僅能輸出六選一【開發建置｜系統維運｜功能增修｜套裝軟體｜硬體｜其他】；若 id ≠ 'A0'：僅能輸出四選一【符合｜部分符合｜未提及｜不適用】；禁止同時輸出多個或其他文字",
     "evidence": [{{"file": "檔名", "page": 頁碼, "quote": "逐字引述"}}],
-    "recommendation": "若部分符合，請給具體補強方向"
+    "recommendation": "若未提及/部分符合，請給具體補強方向；否則留空"
   }}
 ]
 【本批檢核清單（id｜item）】
@@ -184,7 +244,7 @@ def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text:
     return batch_prompt
 
 def make_single_prompt(item: Dict[str, Any], corpus_text: str) -> str:
-    return (item['id'], [item], corpus_text)
+    return make_batch_prompt(item['id'], [item], corpus_text)
 
 # （預審表抽取：預審判定僅允許【符合/不適用】，未勾選輸出空字串；A0 例外為六選一字面）
 def make_precheck_parse_prompt(corpus_text: str) -> str:
@@ -267,7 +327,7 @@ def make_reply_prompt(corpus_text: str) -> str:
 """.strip()
 
 # ==================== 解析/轉表工具 ====================
-def parse_json_array(text: str) -> List[Dict[str, Any]]:
+def parse_json_array(text: str) -> list[dict[str, any]]:
     t = text.strip()
     # 去除可能的 ```json / ``` 包裹
     t = re.sub(r'^```(?:json)?', '', t, flags=re.I).strip()
@@ -285,7 +345,7 @@ def parse_json_array(text: str) -> List[Dict[str, Any]]:
         data = [data]
     return data
 
-def _format_evidence_list(e_list: List[Dict[str, Any]]) -> str:
+def _format_evidence_list(e_list: list[dict[str, any]]) -> str:
     lines = []
     for e in e_list:
         file = e.get('file','')
@@ -297,19 +357,19 @@ def _format_evidence_list(e_list: List[Dict[str, Any]]) -> str:
 
 def normalize_status_equiv(s: str) -> str:
     """
-    預審端僅兩態（符合/不適用）
+    預審端僅兩態（符合/不適用），其餘/空白一律視為「未提及」以利與系統四態比對。
     """
     if s is None:
-        return "空白"
+        return "未提及"
     t = re.sub(r"\s+", "", str(s)).lower()
     if t == "":
-        return "空白"
+        return "未提及"
     if t in ("符合", "ok", "pass", "通過"):
         return "符合"
     if t in ("不適用", "na", "n/a"):
         return "不適用"
     # 任何其它字眼（如不符合/需補件/改善等）一律視為「未提及」（因預審正式只用兩態）
-    return "?"
+    return "未提及"
 
 # 章節 → 代號（含 F）
 SECTION_TO_LETTER = {
@@ -361,7 +421,7 @@ def compute_std_id(raw_id: str, item: str) -> str:
     return ""
 
 # 解析預審 JSON → 製作 5 欄顯示表，並保留隱藏欄位供比對/除錯
-def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
+def parse_precheck_json(text: str) -> list[dict[str, any]]:
     data = parse_json_array(text)
     rows = []
     for r in data if isinstance(data, list) else []:
@@ -389,7 +449,7 @@ def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
         })
     return rows
 
-def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+def precheck_rows_to_df(rows: list[dict[str, any]]) -> pd.DataFrame:
     # 先求出標準 ID（若 LLM 沒給 std_id，就用 compute_std_id 推斷）
     std_ids = []
     for r in rows:
@@ -414,7 +474,7 @@ def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     return df
 
 # ==================== 系統檢核 → DataFrame（排序含 F） ====================
-def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
+def to_dataframe(results: list[dict[str, any]]) -> pd.DataFrame:
     rows = []
     for r in results:
         ev_text = "\n".join([f"{e.get('file','')} p.{e.get('page','')}：{e.get('quote','')}" for e in r.get('evidence', [])])
@@ -459,7 +519,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         if rid:
             sys_idx[rid] = row.to_dict()
 
-    rows_out: List[Dict[str, Any]] = []
+    rows_out: list[dict[str, any]] = []
 
     # 確保有等價級欄位
     if "_預審等價級_隱藏" not in pre_df.columns:
@@ -529,7 +589,6 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "差異說明/建議": "預審未涵蓋此系統檢核項目，建議補列或於會審時提示承辦注意。",
                 "對應頁次/備註": ""
             })
-            print(srow.get("檢核項目",""))
 
     out = pd.DataFrame(rows_out)
     # 依 A→B→C→D→E→F 與編號排序
@@ -580,7 +639,6 @@ def main():
     )
 
     if st.button("🚀 開始審查", disabled=not uploaded_files):
-      
         
         checklist_all = build_rfp_checklist()
 
@@ -641,11 +699,51 @@ def main():
         set_progress(35, "🧠 檢核準備中…")
 
         # 3) 依模式執行檢核（一次性｜批次 AB/CDEF｜逐題）
-        all_results: List[Dict[str, Any]] = []
+        all_results: list[dict[str, any]] = []
         st.info(f"🧪 執行系統檢核模式：{mode}")
         if mode.startswith("一"):
             groups = group_items_by_ABCDE(checklist_all); st.info("一次性審查中")
+        elif mode.startswith("批"):
+            groups = group_items_by_AB_CDE(checklist_all); st.info("批次審查中（AB｜CDEF）")
+        else:
+            groups = None  # 逐題
 
+        if groups is not None:
+            total_batches = len(groups)
+            for bi, (code, items) in enumerate(groups):
+                set_progress(35 + int((bi/max(1,total_batches))*55), f"🔎 第 {bi+1}/{total_batches} 批（{code}）… 共 {len(items)} 項")
+                prompt = make_batch_prompt(code, items, corpus_text)
+                try:
+                    resp = model.generate_content(prompt)
+                    arr = parse_json_array(resp.text)
+                except Exception:
+                    arr = []
+                allowed_ids = {it['id'] for it in items}
+                id_to_meta = {it['id']: it for it in items}
+                normalized = []
+                for d in arr if isinstance(arr, list) else []:
+                    if not isinstance(d, dict): 
+                        continue
+                    rid = d.get('id')
+                    if rid not in allowed_ids:
+                        continue
+                    meta = id_to_meta[rid]
+                    normalized.append({
+                        'id': rid,
+                        'category': d.get('category', meta['category']),
+                        'item': d.get('item', meta['item']),
+                        'compliance': d.get('compliance', ''),
+                        'evidence': d.get('evidence', []),
+                        'recommendation': d.get('recommendation', ''),
+                    })
+                returned_ids = {x['id'] for x in normalized}
+                for it in items:
+                    if it['id'] not in returned_ids:
+                        normalized.append({
+                            'id': it['id'], 'category': it['category'], 'item': it['item'],
+                            'compliance': '未提及', 'evidence': [], 'recommendation': ''
+                        })
+                all_results.extend(normalized)
         else:
             # 逐題模式
             items_ordered = order_items_AB_C_D_E(checklist_all)
@@ -654,7 +752,6 @@ def main():
             for i, it in enumerate(items_ordered):
                 set_progress(35 + int((i/max(1,total_items))*55), f"🧩 第 {i+1}/{total_items} 題：{it['id']} …")
                 prompt = make_single_prompt(it, corpus_text)
-
                 try:
                     resp = model.generate_content(prompt)
                     arr = parse_json_array(resp.text)
@@ -665,7 +762,6 @@ def main():
                     if isinstance(d, dict) and d.get('id') == it['id']:
                         picked = d; break
                 if picked is None:
-                    st.info(item)
                     picked = {
                         'id': it['id'], 'category': it['category'], 'item': it['item'],
                         'compliance': '未提及', 'evidence': [], 'recommendation': ''
@@ -677,7 +773,6 @@ def main():
                     picked.setdefault('evidence', [])
                     picked.setdefault('recommendation', '')
                 all_results.append(picked)
-                st.info(item)
 
         # 4) 檢核結果 → 表格
         set_progress(92, "📦 彙整與轉表格…")
@@ -686,7 +781,6 @@ def main():
      #   render_wrapped_table(df, height_vh=52)
 
         reply_prompt = make_reply_prompt(corpus_text)
-        
         try:
             reply_resp = model.generate_content(reply_prompt)
             reply_text = reply_resp.text.strip()
@@ -725,7 +819,7 @@ def main():
                 disabled=["類別", "編號", "檢核項目（系統基準）", "系統檢核結果"],  # 禁止編輯這些欄位
                 column_config={
                     "預審判定（原字）": st.column_config.SelectboxColumn(
-                        "預審判定", options=["符合", "不適用",""], required=False)})
+                        "預審判定", options=["符合", "不適用","","未提及"], required=False)})
             # 匯出 CSV
             csv = view_df.to_csv(index=False).encode("utf-8-sig")
             
