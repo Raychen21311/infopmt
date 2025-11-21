@@ -30,7 +30,7 @@ from difflib import SequenceMatcher
 load_dotenv()
 if os.getenv('GOOGLE_API_KEY'):
     genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-model = genai.GenerativeModel("gemini-2.5-flash")
+model = genai.GenerativeModel("gemini 2.5 Pro")
 
 # -------------------- 檔案型態 --------------------
 def is_pdf(name: str) -> bool:
