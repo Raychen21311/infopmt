@@ -529,6 +529,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
                 "差異說明/建議": "預審未涵蓋此系統檢核項目，建議補列或於會審時提示承辦注意。",
                 "對應頁次/備註": ""
             })
+            print(srow.get("檢核項目",""))
 
     out = pd.DataFrame(rows_out)
     # 依 A→B→C→D→E→F 與編號排序
