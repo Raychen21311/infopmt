@@ -37,8 +37,8 @@ def is_pdf(name: str) -> bool:
     return name.lower().endswith(".pdf")
 
 # ==================== 檢核清單（含 F 其他重點） ====================
-def build_rfp_checklist() -> list[dict[str, any]]:
-    items: list[dict[str, any]] = []
+def build_rfp_checklist() -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
     def add(cat, code, text): items.append({"category":cat, "id":code, "item":text})
 
     # A 基本與前案
@@ -114,10 +114,10 @@ def build_rfp_checklist() -> list[dict[str, any]]:
     return items
 
 # ==================== 分群/排序工具（批次改為 AB｜CDEF） ====================
-def group_items_by_ABCDE(items: list[dict[str, any]]) -> list[Tuple[str, list[dict[str, any]]]]:
+def group_items_by_ABCDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
     return [("ABCDE", items)] if items else []
 
-def group_items_by_AB_CDE(items: list[dict[str, any]]) -> list[Tuple[str, list[dict[str, any]]]]:
+def group_items_by_AB_CDE(items: List[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
     """保留函式名以相容，但第二組已擴充為 CDEF。"""
     ab   = [it for it in items if it['id'] and it['id'][0] in ('A','B')]
     cdef = [it for it in items if it['id'] and it['id'][0] in ('C','D','E','F')]
@@ -127,7 +127,7 @@ def group_items_by_AB_CDE(items: list[dict[str, any]]) -> list[Tuple[str, list[d
     return groups
 
 # 逐題排序（A→B→C→D→E→F）
-def order_items_AB_C_D_E(items: list[dict[str, any]]) -> list[dict[str, any]]:
+def order_items_AB_C_D_E(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     order_map = {'A':0,'B':1,'C':2,'D':3,'E':4,'F':5}
     return sorted(items, key=lambda it: (order_map.get(it['id'][0], 9), it['id']))
 
@@ -145,13 +145,12 @@ def extract_text_with_headers(pdf_bytes: bytes, filename: str) -> str:
 
 # ==================== LLM Prompts ====================
 
-def make_batch_prompt(batch_code: str, items: list[dict[str, any]], corpus_text: str) -> str:
+def make_batch_prompt(batch_code: str, items: List[Dict[str, Any]], corpus_text: str) -> str:
     checklist_lines = "\n".join([f"{it['id']}｜{it['item']}" for it in items])
-
-    batch_prompt = """
+    return f"""
 你是政府機關資訊處之採購/RFP/契約審查委員。請依下列「檢核條目（{batch_code} 批）」逐條審查文件內容並回傳**唯一 JSON 陣列**，陣列內每個元素對應一條條目。
 【審查原則】
-1) 僅依預審表的***對應頁次/備註***欄位、RFP、契約等相關文件明載內容判斷。
+1) 僅依文件明載內容判斷；未提及即標示「未提及」。
 2) 若屬不適用（例：未允許分包），請回「不適用」並說明依據。
 3) 務必引用原文短句與檔名/頁碼作為 evidence。
 4) ***嚴禁輸出任何與規格聯絡人、電話、姓名、聯繫方式有關的文字，即使原始文件內有。***
@@ -159,17 +158,8 @@ def make_batch_prompt(batch_code: str, items: list[dict[str, any]], corpus_text:
 6) 若 id = 'A1'，請回復"請檢視是否已附前案採購簽陳影本，以確保採購流程的延續性與合法性檢視基礎。"
 7) 若 id = 'A2.1、A2.2、A2.3 或 A2.4'，原則上預審表結果為不適用即為不適用，並回復"與資訊處之相關實務情形，請承辦人再次核實。"
 8) 若 id = 'A2.1、A2.2、A2.3 或 A2.4'，原則上預審表結果為不適用即為不適用，並回復"與資訊處之相關實務情形，請承辦人再次核實。"
-7) 若 id = 'A2.1、A2.2、A2.3 預審表結果為不適用或空白，'A2.4'預審表結果即為符合，並回復"與資訊處之相關實務情形，請承辦人再次核實。"
-
-9) 若 id = 'B1'，符合情形：有包含設備、網路、機房架構圖、有寫硬體放置區域為"衛生福利部外"或"衛生福利部內。
-10) 若 id = 'B2'，符合情形：有包含網路架構圖，一般原則上均無對外連線之網路，架構圖接只畫出對內部線路圖。
-
-12) 若 id = 'C3.1、C3.2'，原則上需求書或契約書無提及"投標廠商有需再分包給其他廠商等相關需求"，即為"不適用"，若有需詳盡說明。
-13) 若 id = 'D4'，如無公開給民眾使用之系統應為不適用、若有提出ODF相關需求亦可為符合，但須說明一下。
-14) 若 id = 'D5、D6'，無App需求內容即為不適用。
-15) 若 id = 'D16'，無 GIS、OpenData、MyData 作業需求，應為不適用。
-16) 若 id = 'D5、D6'，符合兩條件中之一件即可。
-17) 若 id = 'D15'，註5.作業需求必須納入之制式文句：
+9) 若 id = 'D5、D6'，符合兩條件中之一件即可。
+10) 若 id = 'D15'，註5.作業需求必須納入之制式文句：
 *本專案所使用之系統軟體(如作業系統、資料庫軟體等)或瀏覽器軟體版本更新時，於本部通
 知限期內，廠商須對應用系統進行修正。
 *支援系統備援及緊急回復工作，並視本部要求配合執行系統遷移不同伺服主機作業。
@@ -185,7 +175,7 @@ def make_batch_prompt(batch_code: str, items: list[dict[str, any]], corpus_text:
 系統並負有OPENDATA、MYDATA 或交換資料的服務時，應逐步將資料庫的相關欄位參照前述相
 關領域資料標準進行格式標準化，以減少資料運用單位的資料清理(ETL)時間，強化系統服務
 的資料即時性。
-18) 若 id = 'D16'，註6.GIS、OPENDATA、MYDATA 作業需求必須納入之制式文句：
+11) 若 id = 'D16'，註6.GIS、OPENDATA、MYDATA 作業需求必須納入之制式文句：
 (a)GIS（地理圖資系統）：
 *空間資訊須採用全國通用之坐標系統（TWD97、WGS84 EPSG:3857、WGS84 EPSG:4326）。
 *輸入資料格式須至少為CSV、XLS、XLSX、XML、JSON、GeoJSON、KML、KMZ、或SHP，輸出
@@ -219,12 +209,11 @@ JSON。輸入及輸出之資料內容並須符合國發會「政府資料品質�
 當事人身分、資料傳輸成功與否等。
 *開發數位服務個人化(MyData)平臺介接程式，請參考「數位服務個人化(MyData)應用規範」
 及其技術文件(https://github.com/ehousekeeper/emsg)。。
-19)若 id = 'D17'，如非系統移轉或上線，應為不適用。
-20)若 id = 'D19'，如無導入 AI 技術之相關需求，應為不適用。
-21)若 id = 'E1'，文件有紀錄交付時程即符合，如違建置案須注意開發方式等相關內容。
-22)若 id = 'F7'，文件有紀錄交付時程即符合，如如文件未提及則應為不適用。
-23) 若 id = 'A0'，以預審表判定為主(以業務單位需求為主)，可多選。
-24)請注意***檢核項目需完全與檢核條目一模一樣***。
+12)若 id = 'D17'，如非系統移轉或上線，應為不適用。
+13)若 id = 'D19'，如無導入 AI 技術之相關需求，應為不適用。
+14)若 id = 'E1'，文件有紀錄交付時程即符合，如違建置案須注意開發方式等相關內容。
+15)若 id = 'F7'，文件有紀錄交付時程即符合，如如文件未提及則應為不適用。
+16) 若 id = 'A0'，以預審表判定為主(以業務單位需求為主)，可多選。
 【輸出格式 — 僅能輸出 JSON 陣列，無任何多餘文字/標記】
 [
   {{
@@ -241,7 +230,6 @@ JSON。輸入及輸出之資料內容並須符合國發會「政府資料品質�
 【文件全文（含檔名/頁碼標註）】
 {corpus_text}
 """.strip()
-    return batch_prompt
 
 def make_single_prompt(item: Dict[str, Any], corpus_text: str) -> str:
     return make_batch_prompt(item['id'], [item], corpus_text)
@@ -254,7 +242,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 
 【顯示用必填 5 欄】
 - "id": 先填你能辨識的粗編號（如「案件性質-1.」「現況說明-1.(2)」「A2.3」等；若無可留空）
-- "item": 檢核項目（不要省略）
+- "item": 檢核項目（擷取要點，不要省略）
 - "status": 僅能輸出二選一【符合｜不適用】；若該列未勾選任何選項，請輸出空字串 ""
 - "biz_ref_note": 對應頁次或補充說明
 
@@ -313,7 +301,8 @@ def make_reply_prompt(corpus_text: str) -> str:
 請依照使用者上傳文字生成建議回復，回復須包含四點：
 一：「本案採購金額多少萬元，包含系統維運、功能增修等。」(更新金額多少萬元即可，例如1,000萬元)
 二：「資訊系統之維運費用應逐年遞減，廠商報價如有增長，可請廠商於本案之期末報告提供系統使用效益指標，做為次年維運費用成長之判斷。」(請勿修改，請勿補充，一字不漏直接回復)
-三、列出額外參考選項
+三、請檢視RFP/契約書/其餘相關文件 有無大陸用語。
+四、列出額外參考選項
 「有關醫院資料治理工作內容，請參閱本部醫療資訊大平台之醫療資訊標準，如FHIR、LOINC、SNOMED CT、RxNorm，且符合三大AI中心、SMART on FHIR等作業事項。另如有TWCDI及IG需求，可至該平台提案。」
 「有關檢核表，已請單位承辦人酌修完畢制式文句檢核內容。」
 """.strip()
@@ -327,7 +316,7 @@ def make_reply_prompt(corpus_text: str) -> str:
 """.strip()
 
 # ==================== 解析/轉表工具 ====================
-def parse_json_array(text: str) -> list[dict[str, any]]:
+def parse_json_array(text: str) -> List[Dict[str, Any]]:
     t = text.strip()
     # 去除可能的 ```json / ``` 包裹
     t = re.sub(r'^```(?:json)?', '', t, flags=re.I).strip()
@@ -345,7 +334,7 @@ def parse_json_array(text: str) -> list[dict[str, any]]:
         data = [data]
     return data
 
-def _format_evidence_list(e_list: list[dict[str, any]]) -> str:
+def _format_evidence_list(e_list: List[Dict[str, Any]]) -> str:
     lines = []
     for e in e_list:
         file = e.get('file','')
@@ -421,7 +410,7 @@ def compute_std_id(raw_id: str, item: str) -> str:
     return ""
 
 # 解析預審 JSON → 製作 5 欄顯示表，並保留隱藏欄位供比對/除錯
-def parse_precheck_json(text: str) -> list[dict[str, any]]:
+def parse_precheck_json(text: str) -> List[Dict[str, Any]]:
     data = parse_json_array(text)
     rows = []
     for r in data if isinstance(data, list) else []:
@@ -449,7 +438,7 @@ def parse_precheck_json(text: str) -> list[dict[str, any]]:
         })
     return rows
 
-def precheck_rows_to_df(rows: list[dict[str, any]]) -> pd.DataFrame:
+def precheck_rows_to_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     # 先求出標準 ID（若 LLM 沒給 std_id，就用 compute_std_id 推斷）
     std_ids = []
     for r in rows:
@@ -474,7 +463,7 @@ def precheck_rows_to_df(rows: list[dict[str, any]]) -> pd.DataFrame:
     return df
 
 # ==================== 系統檢核 → DataFrame（排序含 F） ====================
-def to_dataframe(results: list[dict[str, any]]) -> pd.DataFrame:
+def to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
     rows = []
     for r in results:
         ev_text = "\n".join([f"{e.get('file','')} p.{e.get('page','')}：{e.get('quote','')}" for e in r.get('evidence', [])])
@@ -513,13 +502,13 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
     pre_df 來自預審辨識：      欄位 [編號, 檢核項目, 預審判定, 對應頁次/備註, _預審等價級_隱藏]
     """
     # 關鍵修正：不要用 set_index("編號").to_dict(...) 以免列 dict 失去「編號」欄
-    sys_idx: dict[str, dict[str, any]] = {}
+    sys_idx: Dict[str, Dict[str, Any]] = {}
     for _, row in sys_df.iterrows():
         rid = str(row.get("編號", "")).strip()
         if rid:
             sys_idx[rid] = row.to_dict()
 
-    rows_out: list[dict[str, any]] = []
+    rows_out: List[Dict[str, Any]] = []
 
     # 確保有等價級欄位
     if "_預審等價級_隱藏" not in pre_df.columns:
@@ -539,7 +528,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         else:
             # 若編號空白或不在系統清單，嘗試以文字相似度
             best_id, best_ratio = fuzzy_match(list(sys_idx.keys()), pid or pitem)
-            if best_ratio >= 0.95 and best_id in sys_idx:
+            if best_ratio >= 0.85 and best_id in sys_idx:
                 matched = sys_idx[best_id]; matched_id = best_id
 
         if matched:
@@ -699,7 +688,7 @@ def main():
         set_progress(35, "🧠 檢核準備中…")
 
         # 3) 依模式執行檢核（一次性｜批次 AB/CDEF｜逐題）
-        all_results: list[dict[str, any]] = []
+        all_results: List[Dict[str, Any]] = []
         st.info(f"🧪 執行系統檢核模式：{mode}")
         if mode.startswith("一"):
             groups = group_items_by_ABCDE(checklist_all); st.info("一次性審查中")
@@ -799,7 +788,7 @@ def main():
             cmp_df = build_compare_table(sys_df=df, pre_df=pre_df)
             st.subheader("🧾 差異對照表（預審 vs. 系統檢核）")
             
-            view_df = cmp_df[cmp_df["差異判定"] != "一致"] 
+            view_df = cmp_df[cmp_df["差異判定"] != "一致"] if show_only_diff else cmp_df
             
             # 只保留指定欄位
             cmp_display_cols = ["類別", "編號", "檢核項目（系統基準）", "預審判定（原字）", "對應頁次/備註", "系統檢核結果", "差異說明/建議"]
@@ -819,7 +808,7 @@ def main():
                 disabled=["類別", "編號", "檢核項目（系統基準）", "系統檢核結果"],  # 禁止編輯這些欄位
                 column_config={
                     "預審判定（原字）": st.column_config.SelectboxColumn(
-                        "預審判定", options=["符合", "不適用","","未提及"], required=False)})
+                        "預審判定", options=["符合", "不適用", ""], required=False)})
             # 匯出 CSV
             csv = view_df.to_csv(index=False).encode("utf-8-sig")
             
