@@ -252,7 +252,7 @@ def make_precheck_parse_prompt(corpus_text: str) -> str:
 
 【顯示用必填 5 欄】
 - "id": 先填你能辨識的粗編號（如「案件性質-1.」「現況說明-1.(2)」「A2.3」等；若無可留空）
-- "item": 檢核項目（擷取要點，不要省略）
+- "item": 檢核項目（不要省略）
 - "status": 僅能輸出二選一【符合｜不適用】；若該列未勾選任何選項，請輸出空字串 ""
 - "biz_ref_note": 對應頁次或補充說明
 
@@ -537,7 +537,7 @@ def build_compare_table(sys_df: pd.DataFrame, pre_df: pd.DataFrame) -> pd.DataFr
         else:
             # 若編號空白或不在系統清單，嘗試以文字相似度
             best_id, best_ratio = fuzzy_match(list(sys_idx.keys()), pid or pitem)
-            if best_ratio >= 0.85 and best_id in sys_idx:
+            if best_ratio >= 0.95 and best_id in sys_idx:
                 matched = sys_idx[best_id]; matched_id = best_id
 
         if matched:
